@@ -1,0 +1,10 @@
+# actionlint's bundled metadata for actions/create-github-app-token@v3 is stale: it still lists
+# app-id as required and doesn't know client-id, which v3's action.yml accepts (app-id is now
+# optional and deprecated in its favour). Versions up to 1.7.11, including the 1.7.7 CI pins, have
+# no v3 metadata and skip the check; 1.7.12 added it. Drop this once actionlint ships fixed
+# metadata: https://github.com/rhysd/actionlint/issues/669
+paths:
+  .github/workflows/claude-code-review.yml:
+    ignore:
+      - '^missing input "app-id" which is required by action "actions/create-github-app-token@v3"\.'
+      - '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\.'
