@@ -1,7 +1,7 @@
 # Claude reviews this repository's pull requests through the shared workflow beside this file,
 # called by its local path: a PR that changes the workflow is reviewed by its own version when it
-# opens, while a /review comment runs main's. Other repositories call it @main from a stub of the
-# same shape, which /iwol:setup writes.
+# opens, while a /review comment runs main's. Other repositories call it at the @v1 ref from a stub
+# of the same shape, which /iwol:setup writes.
 name: Code Review
 
 on:
@@ -24,14 +24,15 @@ jobs:
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
-      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
     with:
       review-app-client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
+      # A mention of @iwol-reviewer starts the request job, and a thank-you to it gets a 🎉
+      review-app-slug: iwol-reviewer
       # A clean review also approves the PR's reviewed head, and one that isn't clean dismisses
       # the bot's earlier approvals
       approve: true
-      # The runner picker may choose a self-hosted or a GitHub-hosted runner, so the tools are
-      # installed for whichever machine runs them
+      # The tools are downloaded into the runner's temporary directory, so the checks need nothing
+      # preinstalled on whichever runner runs them
       checks: |
         run_step setup actionlint-script curl -fsSL -o "$RUNNER_TEMP/download-actionlint.bash" https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash
         run_step setup actionlint-install bash "$RUNNER_TEMP/download-actionlint.bash" 1.7.7 "$RUNNER_TEMP"
