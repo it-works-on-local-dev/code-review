@@ -25,8 +25,8 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 **When it reviews.**
 
 - **By itself, once.** When a pull request opens, or is marked ready for review, it reviews the PR if the PR is not a draft, its branch is in the same repository, and it was not opened by a bot.
-- **On request, after that.** It reviews again only when someone with write access to the repository comments on the PR with a line starting `/review`. The line may name a model and an effort, in either order: `/review`, `/review sonnet`, `/review high`, `/review opus max` and `/review max opus` all work. If it cannot parse the request it replies with a comment starting `Claude review request failed:` and does not review.
-- **With a mention, if you set `review-app-slug`.** A comment from someone with write access that mentions `@<slug>` also counts as a review request, and a thank-you to the bot gets a 🎉 reaction instead of a review. Without `review-app-slug`, only `/review` starts a review.
+- **On request, after that.** It reviews again only when the repository's owner, a member of the organisation that owns it, or a collaborator on it (a comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`) comments on the PR with a line starting `/review`. That includes collaborators with only Read or Triage access and organisation members without write access. The line may name a model and an effort, in either order: `/review`, `/review sonnet`, `/review high`, `/review opus max` and `/review max opus` all work. If it cannot parse the request it replies with a comment starting `Claude review request failed:` and does not review.
+- **Not with a mention.** Only a `/review` line requests a review. If you set `review-app-slug`, a comment from the same people that mentions `@<slug>` also reaches the workflow, so a thank-you to the bot gets a 🎉 reaction. A comment with a `/review` line is reviewed whether or not it also mentions or thanks the bot, so a thank-you with a `/review` line gets both. Without `review-app-slug`, nothing gets the 🎉.
 - **Never for forks.** A pull request whose branch lives in a fork is never reviewed, automatically or on request.
 
 **What a review does.**
@@ -61,7 +61,7 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 A pull request's code is whatever its author wrote, so the workflow never runs it anywhere a secret can be reached.
 
 - **The checks job runs the PR's code with nothing to steal.** Your `checks` steps (install scripts, linters, compilers, tests) run in a job that has no secrets and only a read-only `GITHUB_TOKEN`, which it does not persist into the checkout. It saves the check results as an artifact.
-- **The review job runs no PR code.** It starts on a fresh runner, downloads only the check results, and moves git's directory out of the checkout so nothing in the PR can hook into git. It reads the PR as text and never executes it. Only this job holds the GitHub App token and the Claude credential.
+- **The review job runs no PR code.** It starts on a fresh runner (on a GitHub-hosted runner, or on a self-hosted one only if it is ephemeral; see [Self-hosted example](#self-hosted-example)), downloads only the check results, and moves git's directory out of the checkout, which keeps the app token the action writes into `.git/config` out of the reviewer's reach, since the reviewer can read anything in the checkout. It reads the PR as text and never executes it. Only the jobs that run no PR code (the request, review and report-failure jobs) hold secrets, and the Claude credential reaches only the review job.
 - **Your stub passes secrets by name.** The stub lists each secret the workflow needs, never `secrets: inherit`, so the workflow never sees your other repository or organisation secrets.
 - **It posts as your app.** The review comments, reactions and approvals come from your own GitHub App, `<app slug>[bot]`, not from `claude[bot]`, and the app has only the permissions you gave it.
 
@@ -90,7 +90,7 @@ You need a GitHub App for the review to post as, a stub workflow that calls this
    gh secret set ANTHROPIC_API_KEY
    ```
 
-If you want mentions of the app to request reviews, pass the app's slug as `review-app-slug`.
+If you want a thank-you to the app to get a 🎉, pass the app's slug as `review-app-slug`. Reviews are requested with `/review` either way.
 
 ### Add the stub
 
@@ -134,7 +134,9 @@ The job's name, `Claude`, is why GitHub lists the workflow's checks as `Code Rev
 
 ### Self-hosted example
 
-The stub above runs on GitHub-hosted `ubuntu-latest`. To run the checks and review jobs on self-hosted runners, add a job to your stub that works out which runner to use and pass its result as `runs-on`. This is how this repository's own organisation does it, with a runner picker in its `it-works-on-local-dev/runners` repository that chooses between its self-hosted runners and GitHub-hosted ones:
+The stub above runs on GitHub-hosted `ubuntu-latest`. To run the checks and review jobs on self-hosted runners, add a job to your stub that works out which runner to use and pass its result as `runs-on`. This is how this repository's own organisation does it, with a runner picker in its `it-works-on-local-dev/runners` repository that chooses between its self-hosted runners and GitHub-hosted ones.
+
+Self-hosted runners must be ephemeral: registered with `--ephemeral` or just-in-time, or managed by Actions Runner Controller, so each job gets a runner of its own that no later job reuses. The checks job runs the PR's code, and the review job, sent to the same runners, holds the Claude credential and the app token, so on a persistent runner code started by the checks job could outlive it and reach the review job's tokens.
 
 ```yaml
 jobs:
@@ -179,7 +181,7 @@ The `iwol` Claude Code plugin, from [it-works-on-local-dev/skills](https://githu
 | `exclude-paths` | no | none | Newline-separated paths left out of every diff and never read by the reviewer, for generated output such as `dist/` or `src/generated/`. |
 | `checks` | yes | | Shell run in the checks job after Node is set up, one step per line, written `run_step <setup\|check> <name> <command...>`. A `setup` step adds a summary line only when it fails; a `check` step always adds a pass or FAIL line. A name may use only letters, digits, `.`, `_` and `-`. |
 | `review-app-client-id` | yes | | The review app's client ID, normally the `REVIEW_APP_CLIENT_ID` repository variable. |
-| `review-app-slug` | no | empty | The app's login without `[bot]`. With it set, a comment mentioning `@<slug>` also starts a review request, and a thank-you to the bot gets a 🎉. Without it, only `/review` starts one. |
+| `review-app-slug` | no | empty | The app's login without `[bot]`. With it set, a comment mentioning `@<slug>` also reaches the workflow, so a thank-you to the bot gets a 🎉. Only a `/review` line starts a review, with or without it. |
 | `runs-on` | no | `"ubuntu-latest"` | A JSON label string or JSON array of labels for the machine the checks and review jobs run on. |
 | `default-model` | no | `opus` | The model used when a request names none: an alias or a full model ID. |
 | `default-effort` | no | `xhigh` | The effort used when a request names none. |
