@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/it-works-on-local-dev/code-review/compare/v1.0.0...v1.1.0) (2026-10-22)
+
+
+### Features
+
+* let a review request pick the Claude credential ([#9](https://github.com/it-works-on-local-dev/code-review/issues/9)) ([d34400b](https://github.com/it-works-on-local-dev/code-review/commit/d34400bece9794cb904fb58296ce680ae55aa91e))
+
 ## 1.0.0 (2026-10-22)
 
 
