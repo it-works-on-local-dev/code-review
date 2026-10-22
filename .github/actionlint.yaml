@@ -4,6 +4,10 @@
 # no v3 metadata and skip the check; 1.7.12 added it. Drop this once actionlint ships fixed
 # metadata: https://github.com/rhysd/actionlint/issues/669
 paths:
+  .github/workflows/release.yml:
+    ignore:
+      - '^missing input "app-id" which is required by action "actions/create-github-app-token@v3"\.'
+      - '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\.'
   .github/workflows/claude-code-review.yml:
     ignore:
       - '^missing input "app-id" which is required by action "actions/create-github-app-token@v3"\.'

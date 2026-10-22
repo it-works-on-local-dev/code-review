@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # The release-manager app's token, not GITHUB_TOKEN: a PR, tag or release made with
+      # GITHUB_TOKEN triggers no other workflow, so the Release PR would get no CI run.
+      - name: Generate release-manager app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Check out the repository with its tags
+        uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Deploy step: callers pin @v<major>, so keep that tag on the latest release's commit.
+      # It runs on every run, not only the one that creates the release, so a failed push can
+      # be repaired by re-running or dispatching the workflow.
+      - name: Move the major version tag
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          if ! TAG="$(gh release view --json tagName --jq .tagName 2>"${RUNNER_TEMP}/gh-err")"; then
+            if grep -qi "release not found" "${RUNNER_TEMP}/gh-err"; then
+              echo "No release exists yet; nothing to move."
+              exit 0
+            fi
+            cat "${RUNNER_TEMP}/gh-err" >&2
+            exit 1
+          fi
+          if [ -z "${TAG}" ]; then
+            echo "gh returned no tag name for the latest release." >&2
+            exit 1
+          fi
+          MAJOR="${TAG%%.*}"
+          SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [ "$(git rev-parse -q --verify "refs/tags/${MAJOR}^{commit}" || true)" = "${SHA}" ]; then
+            echo "${MAJOR} already points at ${SHA}."
+            exit 0
+          fi
+          git tag -f "${MAJOR}" "${SHA}"
+          git push --force origin "refs/tags/${MAJOR}"
