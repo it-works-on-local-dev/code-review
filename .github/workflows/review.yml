@@ -8,7 +8,7 @@ on:
   pull_request:
     types: [opened, ready_for_review]
     branches: [main]
-  # A comment line starting "/review [model] [effort]" asks for a fresh review
+  # A comment line starting "/review [model] [effort] [oauth|api-key]" asks for a fresh review
   issue_comment:
     types: [created]
 
@@ -23,9 +23,13 @@ jobs:
     # Only the secrets the workflow declares, not every repository and organisation secret
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # Empty until the secret is set; then /review api-key runs a review on it
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
     with:
       review-app-client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
+      # A review runs on the OAuth token unless its /review line says api-key
+      default-credential: oauth
       # A mention of @iwol-reviewer starts the request job, and a thank-you to it gets a 🎉
       review-app-slug: iwol-reviewer
       # A clean review also approves the PR's reviewed head, and one that isn't clean dismisses
