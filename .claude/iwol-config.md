@@ -71,4 +71,4 @@ gh run view "${run%% *}" --json jobs --jq '.jobs[] | "\(.name): \(.status)"'
 - **Deploy workflow:** `release.yml`, whose only deploy step keeps the `v<major>` tag on the latest release's commit on every run
 - **Production version:** none
 - **Migrations to check before a release:** none
-- **Rollback:** none
+- **Rollback:** mark the last good release as latest with `gh release edit <tag> --latest`, then dispatch `release.yml` (`gh workflow run release.yml`) so it moves `v<major>` there. Don't move `v<major>` by hand: the next push to `main` moves it back to the latest release. The next release-please release becomes latest again and moves the tag forward.
