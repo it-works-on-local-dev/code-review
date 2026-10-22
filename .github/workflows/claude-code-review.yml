@@ -161,6 +161,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           REVIEW_APP_SLUG: ${{ inputs.review-app-slug }}
+          RUNS_ON: ${{ inputs.runs-on }}
           # Only whether a Claude credential is set reaches the shell, never its value
           HAS_CREDENTIAL: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
         run: |
@@ -241,6 +242,9 @@ jobs:
           DEFAULT_EFFORT=${DEFAULT_EFFORT,,}
           [[ $DEFAULT_MODEL =~ $models ]] || fail "The workflow's default-model '$DEFAULT_MODEL' isn't a model name."
           [[ $DEFAULT_EFFORT =~ $efforts ]] || fail "The workflow's default-effort '$DEFAULT_EFFORT' isn't low, medium, high, xhigh or max."
+          # The checks and review jobs run on fromJSON(runs-on), so it must be a label or a list of labels
+          jq -e 'type == "string" or (type == "array" and length > 0 and all(.[]; type == "string"))' <<< "$RUNS_ON" > /dev/null 2>&1 \
+            || fail "The workflow's runs-on isn't a JSON label string or array, e.g. '\"ubuntu-latest\"'."
           # The review needs one of the two Claude credentials. Checked here, after the app token
           # exists and after a comment with no request line has left quietly, so an automatic run
           # fails before the checks and review jobs start and a /review comment gets a reply saying why.
