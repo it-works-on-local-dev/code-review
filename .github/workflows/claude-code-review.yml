@@ -1,6 +1,6 @@
-# The org's shared Claude code review. Every repository calls it from a short stub, so an
-# improvement here reaches all of them at once; "The review workflow" in this repository's README
-# documents the inputs and secrets, and /iwol:setup writes the stub:
+# A reusable Claude code review. A repository calls it from a short stub like the one below;
+# the "Inputs" and "Secrets" sections of this repository's README document what the stub passes,
+# and the iwol plugin's setup skill (/iwol:setup) can write the stub for you:
 #
 #   name: Code Review
 #   on:
@@ -14,13 +14,12 @@
 #       name: Claude
 #       permissions:
 #         contents: read
-#       uses: it-works-on-local-dev/tooling/.github/workflows/claude-code-review.yml@main
+#       uses: it-works-on-local-dev/code-review/.github/workflows/claude-code-review.yml@v1
 #       secrets:
 #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 #         REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
-#         RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
 #       with:
-#         review-app-client-id: <the REVIEW_APP_CLIENT_ID repository variable>
+#         review-app-client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
 #         checks: |
 #           run_step setup install <install command>
 #           run_step check <name> <command>
@@ -40,7 +39,7 @@ on:
         type: string
         default: .nvmrc
       exclude-paths:
-        description: Newline-separated paths left out of every diff and never read by the reviewer, for generated output such as graphify-out.
+        description: Newline-separated paths left out of every diff and never read by the reviewer, for generated output such as a build directory.
         type: string
         default: ''
       checks:
@@ -54,6 +53,13 @@ on:
         description: The review GitHub App's client ID, normally the REVIEW_APP_CLIENT_ID repository variable.
         type: string
         required: true
+      review-app-slug:
+        description: >-
+          The review GitHub App's login without the [bot] suffix. A comment mentioning @<slug> then
+          starts the request job, and a thank-you to it gets a 🎉. Left empty, only a line starting
+          /review starts a review, and nothing gets the 🎉.
+        type: string
+        default: ''
       default-model:
         description: >-
           Model used when a review request names none. An alias such as opus resolves to the newest
@@ -71,25 +77,31 @@ on:
           plan: whoever writes a PR can obtain it, so never let it count toward required reviews.
         type: boolean
         default: false
+      runs-on:
+        description: >-
+          The runner for the checks and review jobs, as JSON: a label string such as
+          '"ubuntu-latest"', or an array of labels such as '["self-hosted", "linux"]'.
+        type: string
+        default: '"ubuntu-latest"'
     # Callers pass each secret by name rather than with secrets: inherit, so this workflow, called
-    # at the mutable @main ref, never sees their other repository and organisation secrets. A
+    # at a mutable ref such as @v1, never sees their other repository and organisation secrets. A
     # secret added here reaches no caller until its stub passes it, and a required one stops every
-    # stub that doesn't: add it as optional, and add it to /iwol:setup's SKILL.md (its stub, its
-    # Step 3 secrets: item and its Step 5 list of secrets to check), the stub above, this
-    # repository's review.yml and the README. Removing or renaming one is the reverse, and riskier:
-    # GitHub won't start this workflow for a caller that passes a secret it doesn't declare, so
-    # first make the old one optional, take it out of those other places and re-run /iwol:setup in
-    # every consuming repository, and only then remove its declaration here. A rename adds the new
-    # name first; while both are declared, the jobs read secrets.NEW || secrets.OLD, and each
-    # repository sets the new secret before its stub stops passing the old one.
+    # stub that doesn't: add it as optional, and add it to the stub above, this repository's
+    # review.yml and the README. Removing or renaming one is the reverse, and riskier: GitHub won't
+    # start this workflow for a caller that passes a secret it doesn't declare, so first make the
+    # old one optional, take it out of those other places and out of every caller's stub, and only
+    # then remove its declaration here. A rename adds the new name first; while both are declared,
+    # the jobs read secrets.NEW || secrets.OLD, and each repository sets the new secret before its
+    # stub stops passing the old one.
+    # This repository's README documents the procedure.
     secrets:
+      # One of the two Claude credentials is required; the request job fails early without either
       CLAUDE_CODE_OAUTH_TOKEN:
-        required: true
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
       REVIEW_APP_PRIVATE_KEY:
         required: true
-      # Without it the runner picker falls back to GitHub-hosted runners
-      RUNNER_STATUS_TOKEN:
-        required: false
 
 env:
   PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -101,9 +113,10 @@ jobs:
   request:
     # Automatic: non-draft PRs from this repo, except ones opened by bots
     # (the action refuses bot actors unless they're listed in allowed_bots).
-    # On request: a comment with /review, or a thank-you to @iwol-reviewer,
-    # from someone with write access; the step below decides what, if
-    # anything, it asks for. Closed and merged PRs can be reviewed on request too.
+    # On request: a comment with /review, or a mention of @<review-app-slug>
+    # when the caller sets one, from someone with write access; the step
+    # below decides what, if anything, it asks for. Closed and merged PRs can
+    # be reviewed on request too.
     if: >-
       (github.event_name == 'pull_request' &&
         github.event.pull_request.draft == false &&
@@ -112,7 +125,8 @@ jobs:
       (github.event_name == 'issue_comment' &&
         github.event.issue.pull_request &&
         (contains(github.event.comment.body, '/review') ||
-          contains(github.event.comment.body, '@iwol-reviewer')) &&
+          (inputs.review-app-slug != '' &&
+            contains(github.event.comment.body, format('@{0}', inputs.review-app-slug)))) &&
         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -129,6 +143,17 @@ jobs:
       model: ${{ steps.read.outputs.model }}
       effort: ${{ steps.read.outputs.effort }}
     steps:
+      # The review needs one of the two Claude credentials, so a caller that passes neither learns
+      # why before anything else runs. Only whether one is set reaches the shell, never its value.
+      - name: Check for a Claude credential
+        env:
+          HAS_CREDENTIAL: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          if [ "$HAS_CREDENTIAL" != true ]; then
+            echo "::error::Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
+            exit 1
+          fi
+
       # Comments are posted as the custom app's bot, not claude[bot]
       - name: Generate reviewer app token
         id: app-token
@@ -143,6 +168,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           EVENT_NAME: ${{ github.event_name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          REVIEW_APP_SLUG: ${{ inputs.review-app-slug }}
         run: |
           # Errors also go to an output, so a failed /review can say why
           fail() {
@@ -154,7 +180,13 @@ jobs:
           # a review request. It must read "/review [model] [effort]" (either
           # order, each optional). Only known-safe values get through.
           request='^[[:space:]]*/review([[:space:]]|$)'
-          mention='(^|[^[:alnum:]_.@-])@iwol-reviewer([^[:alnum:]_-]|$)'
+          # A mention of the review app's whole login. Without a slug there is no pattern, and
+          # thanked() below matches nothing, so neither a bare @ nor a partial login counts.
+          mention=
+          if [ -n "$REVIEW_APP_SLUG" ]; then
+            [[ $REVIEW_APP_SLUG =~ ^[[:alnum:]-]+$ ]] || fail "The workflow's review-app-slug '$REVIEW_APP_SLUG' isn't a GitHub App slug."
+            mention="(^|[^[:alnum:]_.@-])@${REVIEW_APP_SLUG}([^[:alnum:]_-]|\$)"
+          fi
           thank_word='(^|[^[:alpha:]])thank'
           models='^(opus|sonnet|haiku|fable|best|claude-[a-z0-9]+(-[a-z0-9]+)*)$'
           efforts='^(low|medium|high|xhigh|max)$'
@@ -168,9 +200,11 @@ jobs:
             done
             printf '%s\n' "$line"
           }
-          # Easter egg: a thank-you to @iwol-reviewer (outside quotes) gets a 🎉
+          # Easter egg: a thank-you to @<review-app-slug> (outside quotes) gets a 🎉, and with no
+          # slug nothing does
           thanked() {
             local l
+            [ -n "$mention" ] || return 1
             shopt -s nocasematch
             while IFS= read -r l || [ -n "$l" ]; do
               [[ $l =~ ^[[:space:]]*\> ]] && continue
@@ -274,29 +308,13 @@ jobs:
           printf 'Claude review request failed: %s\n\nRun: %s\n' "${ERROR:-the request could not be read.}" "$RUN_URL" > "$RUNNER_TEMP/request-failed.md"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/request-failed.md"
 
-  # The org's runner picker: self-hosted runners when they're online, GitHub-hosted ones otherwise,
-  # and always GitHub-hosted without RUNNER_STATUS_TOKEN. Deliberately outside the review's
-  # concurrency group: the pick happens before a review queued behind another one starts, so if the
-  # self-hosted runners go offline in between, that review waits for them instead of falling back.
-  # Sharing the group instead would let another run's job take the group between this job and the
-  # review, dropping a queued request.
-  runner:
-    needs: request
-    if: needs.request.outputs.review == 'true'
-    # The picker only needs the secret below. No GITHUB_TOKEN scopes, whatever the runners repo's
-    # main branch says.
-    permissions: {}
-    uses: it-works-on-local-dev/runners/.github/workflows/pick-runner.yml@main
-    secrets:
-      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
-
   # Runs the PR's own code (install scripts, linters, compilers), so it gets a job of its own with
   # no secrets and a read-only token it doesn't persist. Code it starts can't reach the review job,
   # which runs on a fresh runner and only downloads the results. The repository's CI runs its tests.
   checks:
-    needs: [request, runner]
+    needs: request
     if: needs.request.outputs.review == 'true'
-    runs-on: ${{ fromJSON(needs.runner.outputs.linux) }}
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -408,15 +426,15 @@ jobs:
           overwrite: true
 
   review:
-    needs: [request, runner, checks]
+    needs: [request, checks]
     # Runs even when the checks job failed, so a broken install still gets a review
-    if: ${{ !cancelled() && needs.request.outputs.review == 'true' && needs.runner.result == 'success' }}
+    if: ${{ !cancelled() && needs.request.outputs.review == 'true' }}
     # Opening a PR or marking it ready replaces a running review; a
     # /review request waits for it instead
     concurrency:
       group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    runs-on: ${{ fromJSON(needs.runner.outputs.linux) }}
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -586,7 +604,9 @@ jobs:
       - id: claude
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
+          # The action uses whichever of the two credentials the caller set
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}
           bot_id: ${{ steps.bot.outputs.id }}
           bot_name: ${{ steps.app-token.outputs.app-slug }}[bot]
@@ -684,7 +704,7 @@ jobs:
       # must never count toward required reviews, since whoever writes a PR can obtain it: checks
       # 1-3 come from a reviewer the PR's diff can steer, so they catch an inconsistent reviewer, not
       # a steered one; check 4 reads the results of the PR's own scripts; and a pull_request run
-      # uses the PR's own stub (in tooling, its own copy of this workflow), with secrets for a
+      # uses the PR's own stub (in this repository, its own copy of this workflow), with secrets for a
       # same-repository branch.
       # Clean means all of these hold:
       #   1. the Claude step succeeded, its structured output has a findings array and it's empty,
