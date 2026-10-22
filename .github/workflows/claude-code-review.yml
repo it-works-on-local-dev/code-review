@@ -175,12 +175,16 @@ jobs:
           # a review request. It must read "/review [model] [effort]" (either
           # order, each optional). Only known-safe values get through.
           request='^[[:space:]]*/review([[:space:]]|$)'
-          # A mention of the review app's whole login. Without a slug there is no pattern, and
+          # A mention of the review app's whole login. Without a valid slug there is no pattern, and
           # thanked() below matches nothing, so neither a bare @ nor a partial login counts.
           mention=
+          slug_problem=
           if [ -n "$REVIEW_APP_SLUG" ]; then
-            [[ $REVIEW_APP_SLUG =~ ^[[:alnum:]-]+$ ]] || fail "The workflow's review-app-slug '$REVIEW_APP_SLUG' isn't a GitHub App slug."
-            mention="(^|[^[:alnum:]_.@-])@${REVIEW_APP_SLUG}([^[:alnum:]_-]|\$)"
+            if [[ $REVIEW_APP_SLUG =~ ^[[:alnum:]-]+$ ]]; then
+              mention="(^|[^[:alnum:]_.@-])@${REVIEW_APP_SLUG}([^[:alnum:]_-]|\$)"
+            else
+              slug_problem="The workflow's review-app-slug '$REVIEW_APP_SLUG' isn't a GitHub App slug."
+            fi
           fi
           thank_word='(^|[^[:alpha:]])thank'
           models='^(opus|sonnet|haiku|fable|best|claude-[a-z0-9]+(-[a-z0-9]+)*)$'
@@ -245,6 +249,8 @@ jobs:
           # The checks and review jobs run on fromJSON(runs-on), so it must be a label or a list of labels
           jq -e 'type == "string" or (type == "array" and length > 0 and all(.[]; type == "string"))' <<< "$RUNS_ON" > /dev/null 2>&1 \
             || fail "The workflow's runs-on isn't a JSON label string or array, e.g. '\"ubuntu-latest\"'."
+          # An invalid review-app-slug, found above, fails only an automatic run or a real request
+          [ -z "$slug_problem" ] || fail "$slug_problem"
           # The review needs one of the two Claude credentials. Checked here, after the app token
           # exists and after a comment with no request line has left quietly, so an automatic run
           # fails before the checks and review jobs start and a /review comment gets a reply saying why.
