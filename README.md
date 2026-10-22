@@ -67,7 +67,7 @@ A pull request's code is whatever its author wrote, so the workflow never runs i
 
 ## Set it up
 
-You need a GitHub App for the review to post as, a stub workflow that calls this workflow, and three values stored in your repository: the app's client ID, its private key, and a Claude credential.
+You need a GitHub App for the review to post as, a stub workflow that calls this workflow, a Node version file in your repository (`.nvmrc` unless you set `node-version-file`, plus a `packageManager` field in `package.json` if you use pnpm), and three values stored in your repository: the app's client ID, its private key, and a Claude credential.
 
 ### Create the GitHub App
 
@@ -176,8 +176,8 @@ The `iwol` Claude Code plugin, from [it-works-on-local-dev/skills](https://githu
 
 | Input | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `package-manager` | no | `npm` | `npm` or `pnpm`. pnpm is set up before Node. |
-| `node-version-file` | no | `.nvmrc` | The file Node's version is read from. |
+| `package-manager` | no | `npm` | `npm` or `pnpm`. pnpm is set up before Node, at the version named by `package.json`'s `packageManager` field, which must be set; without it the checks job stops before any check runs. |
+| `node-version-file` | no | `.nvmrc` | The file Node's version is read from. It must exist in your repository: the checks job always sets Node up from it, and stops before any check runs without it. |
 | `exclude-paths` | no | none | Newline-separated paths left out of every diff and never read by the reviewer, for generated output such as `dist/` or `src/generated/`. |
 | `checks` | yes | | Shell run in the checks job after Node is set up, one step per line, written `run_step <setup\|check> <name> <command...>`. A `setup` step adds a summary line only when it fails; a `check` step always adds a pass or FAIL line. A name may use only letters, digits, `.`, `_` and `-`. |
 | `review-app-client-id` | yes | | The review app's client ID, normally the `REVIEW_APP_CLIENT_ID` repository variable. |
