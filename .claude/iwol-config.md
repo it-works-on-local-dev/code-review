@@ -33,7 +33,7 @@ Always untracked here. Never stage them: none.
 - **Findings:** inline comments from the bot, one per finding. The summary starts with an `### N issue(s) found` heading (`### 1 issue found`, `### 2 issues found`) in place of the clean heading, then lists each finding as one `- ` line; an older summary lists them with no heading, in place of "No issues found.". No priority badges; take priority from the wording. A summary line with no inline comment is still a finding.
 - **Counting review rounds:** count the bot's summary comments, the ones with a `Reviewed head: ` line. GitHub records an empty `COMMENTED` review per inline comment, so GitHub's review count overcounts.
 - **Resolved findings count as clean:** yes, once every thread from the head's summary has an outcome reply and is resolved, unless that summary says the review was partial.
-- **Usage limit:** no message of its own. A failed, timed-out or cancelled review gets a bot comment starting "Claude review didn't finish" for a requested review, or a red `Claude / review` check for an automatic one. A red `Claude / request` or `Claude / runner / …` check with a skipped `Claude / review` also means the automatic review failed. A red `Claude / checks` stays out of it: the review still runs and reports the checks as unavailable. Each run uploads `claude-review-pr<PR>-<sha>-attempt<n>` (execution log, check output, the diffs it read) for 14 days. Retry an automatic review with `gh run rerun <run-id>` (all jobs, so the runner is picked again); retry a requested one with a new `/review`.
+- **Usage limit:** no message of its own. A failed, timed-out or cancelled review gets a bot comment starting "Claude review didn't finish" for a requested review, or a red `Claude / review` check for an automatic one. A red `Claude / request` check with a skipped `Claude / review` also means the automatic review failed. A red `Claude / checks` stays out of it: the review still runs and reports the checks as unavailable. Each run uploads `claude-review-pr<PR>-<sha>-attempt<n>` (execution log, check output, the diffs it read) for 14 days. Retry an automatic review with `gh run rerun <run-id>` (reruns the whole run); retry a requested one with a new `/review`.
 - **Review rules:** generic rules live in the workflow's prompt; this repo has no repo-specific rules.
 
 ## CI
@@ -68,7 +68,7 @@ gh run view "${run%% *}" --json jobs --jq '.jobs[] | "\(.name): \(.status)"'
 
 - **Release PR branch:** `release-please--branches--main`
 - **Release workflow:** `release.yml`
-- **Deploy workflow:** `release.yml`, whose only deploy step moves the `v<major>` tag once the release is created
+- **Deploy workflow:** `release.yml`, whose only deploy step keeps the `v<major>` tag on the latest release's commit on every run
 - **Production version:** none
 - **Migrations to check before a release:** none
 - **Rollback:** none
