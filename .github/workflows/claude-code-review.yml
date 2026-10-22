@@ -80,7 +80,10 @@ on:
       runs-on:
         description: >-
           The runner for the checks and review jobs, as JSON: a label string such as
-          '"ubuntu-latest"', or an array of labels such as '["self-hosted", "linux"]'.
+          '"ubuntu-latest"', or an array of labels such as '["self-hosted", "linux"]'. A self-hosted
+          runner must be ephemeral, taking one job and then being replaced: the checks job runs the
+          PR's code, and the review job holds the app key and the Claude credential, so code left
+          behind on a reused runner could reach a later review's secrets.
         type: string
         default: '"ubuntu-latest"'
     # Callers pass each secret by name rather than with secrets: inherit, so this workflow, called
@@ -143,17 +146,6 @@ jobs:
       model: ${{ steps.read.outputs.model }}
       effort: ${{ steps.read.outputs.effort }}
     steps:
-      # The review needs one of the two Claude credentials, so a caller that passes neither learns
-      # why before anything else runs. Only whether one is set reaches the shell, never its value.
-      - name: Check for a Claude credential
-        env:
-          HAS_CREDENTIAL: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
-        run: |
-          if [ "$HAS_CREDENTIAL" != true ]; then
-            echo "::error::Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
-            exit 1
-          fi
-
       # Comments are posted as the custom app's bot, not claude[bot]
       - name: Generate reviewer app token
         id: app-token
@@ -169,6 +161,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           REVIEW_APP_SLUG: ${{ inputs.review-app-slug }}
+          # Only whether a Claude credential is set reaches the shell, never its value
+          HAS_CREDENTIAL: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
         run: |
           # Errors also go to an output, so a failed /review can say why
           fail() {
@@ -247,6 +241,10 @@ jobs:
           DEFAULT_EFFORT=${DEFAULT_EFFORT,,}
           [[ $DEFAULT_MODEL =~ $models ]] || fail "The workflow's default-model '$DEFAULT_MODEL' isn't a model name."
           [[ $DEFAULT_EFFORT =~ $efforts ]] || fail "The workflow's default-effort '$DEFAULT_EFFORT' isn't low, medium, high, xhigh or max."
+          # The review needs one of the two Claude credentials. Checked here, after the app token
+          # exists and after a comment with no request line has left quietly, so an automatic run
+          # fails before the checks and review jobs start and a /review comment gets a reply saying why.
+          [ "$HAS_CREDENTIAL" = true ] || fail "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
           # A comment payload doesn't say where the PR comes from or merges into
           info=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isCrossRepository,baseRefName --jq '"\(.isCrossRepository) \(.baseRefName)"')
           if [ "${info%% *}" = true ]; then
