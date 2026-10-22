@@ -3,8 +3,7 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
-      "release-type": "simple",
-      "release-as": "1.0.0"
+      "release-type": "simple"
     }
   }
 }
