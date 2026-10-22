@@ -83,10 +83,11 @@ on:
           The runner for the checks and review jobs, as JSON: a label string such as
           '"ubuntu-latest"', or an array of labels such as '["self-hosted", "linux"]'. A self-hosted
           runner must run each job on a freshly provisioned VM or container that is thrown away after
-          the job and can't reach outside itself: no mounted host Docker socket and no privileged
-          containers such as ARC's dind mode, otherwise a new VM per job. --ephemeral or just-in-time
-          registration on reused hardware isn't enough: the checks job runs the PR's code, and the
-          review job holds the app key and the Claude credential.
+          the job and can't reach its host or the machines other jobs run on: no mounted host Docker
+          socket, no privileged mode, and no host namespaces or mounts, such as ARC's dind mode;
+          otherwise a new VM per job. --ephemeral or just-in-time registration on reused hardware
+          isn't enough: the checks job runs the PR's code, and the review job holds the app key and
+          the Claude credential.
         type: string
         default: '"ubuntu-latest"'
     # Callers pass each secret by name rather than with secrets: inherit, so this workflow, called
