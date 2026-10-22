@@ -264,7 +264,8 @@ jobs:
           # The action only runs for an actor with write or admin access, or a bot, so anyone else
           # stops here, before the checks job, the review queue and the approval step
           if [[ $ACTOR != *'[bot]' ]]; then
-            permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$ACTOR/permission" --jq .permission) || permission=
+            permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$ACTOR/permission" --jq .permission) \
+              || fail "Couldn't look up $ACTOR's access to this repository."
             [[ $permission == admin || $permission == write ]] \
               || fail "A review needs write or admin access on this repository, and $ACTOR doesn't have it."
           fi
