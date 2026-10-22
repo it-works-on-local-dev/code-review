@@ -66,4 +66,9 @@ gh run view "${run%% *}" --json jobs --jq '.jobs[] | "\(.name): \(.status)"'
 
 ## Releases
 
-Releases: none
+- **Release PR branch:** `release-please--branches--main`
+- **Release workflow:** `release.yml`
+- **Deploy workflow:** `release.yml`, whose only deploy step moves the `v<major>` tag once the release is created
+- **Production version:** none
+- **Migrations to check before a release:** none
+- **Rollback:** none
