@@ -25,7 +25,7 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 **When it reviews.**
 
 - **By itself.** When a pull request opens, or each time it's marked ready for review, it reviews the PR if the PR is not a draft, its branch is in the same repository, and it was not opened by a bot. Such a review replaces a review still running for the PR.
-- **On request.** It reviews when someone with write or admin access on the repository comments on the PR with a line starting `/review`. A request reaches any PR whose branch is in the repository, including the ones the automatic review skips: drafts, PRs opened by Dependabot or another bot, PRs into a branch other than the one your stub names, and closed or merged PRs. It's the usual way to get a Dependabot PR reviewed. The workflow accepts a comment from the repository's owner, a member of the organisation that owns it, or a collaborator on it (a comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`), then checks the commenter's repository permission itself. An owner, member or collaborator without write or admin access gets a reply starting `Claude review request failed:` from the workflow's first job, and nothing else runs. A `/review` from anyone else is ignored, with no reply. The line may name a model and an effort, in either order: `/review`, `/review sonnet`, `/review high`, `/review opus max` and `/review max opus` all work. If it cannot parse the request it replies with a comment starting `Claude review request failed:` and does not review.
+- **On request.** It reviews when someone with write or admin access on the repository comments on the PR with a line starting `/review`. A request reaches any PR whose branch is in the repository, including the ones the automatic review skips: drafts, PRs opened by Dependabot or another bot, PRs into a branch other than the one your stub names, and closed or merged PRs. It's the usual way to get a Dependabot PR reviewed. The workflow accepts a comment from the repository's owner, a member of the organisation that owns it, or a collaborator on it (a comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`), then checks the commenter's repository permission itself. An owner, member or collaborator without write or admin access gets a reply starting `Claude review request failed:` from the workflow's first job, and nothing else runs. A `/review` from anyone else is ignored, with no reply. The line may name a model, an effort and a credential, in any order: `/review`, `/review sonnet`, `/review high`, `/review opus max`, `/review max opus` and `/review api-key opus` all work. If it cannot parse the request it replies with a comment starting `Claude review request failed:` and does not review.
 - **Not with a mention.** Only a `/review` line requests a review. If you set `review-app-slug`, a comment that mentions `@<slug>` from any owner, organisation member or collaborator, with or without write access, also reaches the workflow, so a thank-you to the bot gets a 🎉 reaction. A comment with a `/review` line is reviewed whether or not it also mentions or thanks the bot, so a thank-you with a `/review` line gets both. Without `review-app-slug`, nothing gets the 🎉.
 - **Never for forks.** A pull request whose branch lives in a fork is never reviewed, automatically or on request.
 
@@ -54,7 +54,9 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 
    A review with no findings has the heading `### No issues found! 🚀` instead.
 
-**Models and effort.** A review uses `default-model` and `default-effort` unless the request names others. For the automatic review, the request is the PR description's last line starting `/review`, read the same way as a comment's (`/review haiku low`, `/review opus max`), and anything it leaves out uses the defaults. A description line the workflow can't parse is ignored, with only a warning in the run log, and the review uses the defaults. A model may be an alias (`opus`, `sonnet`, `haiku`, `fable` or `best`) or a full model ID. An alias resolves to the newest model of that name known to the Claude Code inside the pinned [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action). Dependabot keeps that pin current in this repository, which is how an alias moves on to a newer model without you changing anything.
+**Models, effort and credentials.** A review uses `default-model`, `default-effort` and `default-credential` unless the request names others. For the automatic review, the request is the PR description's last line starting `/review`, read the same way as a comment's (`/review haiku low`, `/review opus max`), and anything it leaves out uses the defaults. A description line the workflow can't parse is ignored, with only a warning in the run log, and the review uses the defaults. A model may be an alias (`opus`, `sonnet`, `haiku`, `fable` or `best`) or a full model ID. An alias resolves to the newest model of that name known to the Claude Code inside the pinned [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action). Dependabot keeps that pin current in this repository, which is how an alias moves on to a newer model without you changing anything.
+
+A request may also name the Claude credential the review runs on: `oauth` for `CLAUDE_CODE_OAUTH_TOKEN`, or `api-key` for `ANTHROPIC_API_KEY`, as in `/review api-key` or `/review oauth opus max`. Your stub must pass that secret: a comment asking for one it doesn't pass gets a reply starting `Claude review request failed:`, and a PR description that does so has its credential ignored, with a warning in the run log, while its model and effort still apply. The review is handed only the credential it runs on, so the other is never used, not even by the action's inline-comment classifier, which calls the API with the key whenever it has one. To offer the choice, set both secrets and pass both in your stub.
 
 ## How it keeps secrets away from PR code
 
@@ -82,11 +84,11 @@ You need a GitHub App for the review to post as, a stub workflow that calls this
    gh secret set REVIEW_APP_PRIVATE_KEY < path/to/private-key.pem
    ```
 
-6. Store one of the two Claude credentials (see [Secrets](#secrets)):
+6. Store one or both of the two Claude credentials (see [Secrets](#secrets)). With both, a `/review` line can choose which one a review runs on:
 
    ```sh
    gh secret set CLAUDE_CODE_OAUTH_TOKEN   # a token from `claude setup-token`
-   # or
+   # and/or
    gh secret set ANTHROPIC_API_KEY
    ```
 
@@ -103,7 +105,7 @@ on:
   pull_request:
     types: [opened, ready_for_review]
     branches: [main]
-  # A comment line starting "/review [model] [effort]" asks for a fresh review
+  # A comment line starting "/review [model] [effort] [oauth|api-key]" asks for a fresh review
   issue_comment:
     types: [created]
 
@@ -118,7 +120,7 @@ jobs:
     # Only the secrets the workflow declares, never secrets: inherit
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      # or, with an API key instead:
+      # and/or an API key; with both, /review oauth or /review api-key picks one:
       # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
     with:
@@ -196,6 +198,7 @@ The `iwol` Claude Code plugin, from [it-works-on-local-dev/skills](https://githu
 | `runs-on` | no | `"ubuntu-latest"` | A JSON label string or JSON array of labels for the machine the checks and review jobs run on. In YAML, quote the JSON: `runs-on: '"ubuntu-24.04"'` or `runs-on: '["self-hosted", "linux"]'`. An expression whose output is already JSON, such as the self-hosted example's `${{ needs.runner.outputs.linux }}`, is passed as it is. |
 | `default-model` | no | `opus` | The model used when a request names none: an alias or a full model ID. |
 | `default-effort` | no | `xhigh` | The effort used when a request names none. |
+| `default-credential` | no | `auto` | The Claude credential used when a request names none: `oauth` (`CLAUDE_CODE_OAUTH_TOKEN`), `api-key` (`ANTHROPIC_API_KEY`), or `auto`, which takes whichever of the two your stub passes, and the API key when it passes both, as the action itself would. If it names a secret your stub doesn't pass, every review that names no credential fails. |
 | `approve` | no | `false` | Approve the reviewed head when a review is clean, and dismiss the bot's earlier approvals when one is not. See [Approving clean reviews](#approving-clean-reviews). |
 
 ## Secrets
@@ -204,11 +207,11 @@ Pass each secret by name in the stub's `secrets:` block.
 
 | Secret | Required | Meaning |
 | --- | --- | --- |
-| `CLAUDE_CODE_OAUTH_TOKEN` | one of the two | A Claude Code OAuth token, for example from `claude setup-token`. |
-| `ANTHROPIC_API_KEY` | one of the two | An Anthropic API key. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | at least one of the two | A Claude Code OAuth token, for example from `claude setup-token`. |
+| `ANTHROPIC_API_KEY` | at least one of the two | An Anthropic API key. |
 | `REVIEW_APP_PRIVATE_KEY` | yes | The review app's private key. |
 
-`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` are each optional to GitHub, but the workflow needs one of them: with neither, it fails early with `Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY`.
+`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` are each optional to GitHub, but the workflow needs one of them: with neither, it fails early with `Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY`. Pass both to let each review request choose between them, as described under [What the workflow does](#what-the-workflow-does).
 
 ## Approving clean reviews
 
@@ -220,7 +223,7 @@ With `approve: true`, a clean review also submits a GitHub approval on the head 
 - every review thread the bot started is resolved, and
 - the PR is still open and not a draft at the reviewed head.
 
-**Never let this approval count toward required reviews, on any plan.** Whoever writes a pull request can obtain it: the reviewer reads the PR's own diff, and the checks are the PR's own scripts, so the author controls everything the verdict rests on. The author can even pick the automatic review's model and effort, with a `/review` line in the PR description. Treat the approval as a visible signal only. Where your branch protection or rulesets require approvals, also require one from a person or team, through Code Owners or a ruleset's required reviewers. Do not remove the app's permissions instead: it needs them to post the review.
+**Never let this approval count toward required reviews, on any plan.** Whoever writes a pull request can obtain it: the reviewer reads the PR's own diff, and the checks are the PR's own scripts, so the author controls everything the verdict rests on. The author can even pick the automatic review's model, effort and credential, with a `/review` line in the PR description. Treat the approval as a visible signal only. Where your branch protection or rulesets require approvals, also require one from a person or team, through Code Owners or a ruleset's required reviewers. Do not remove the app's permissions instead: it needs them to post the review.
 
 ## Versioning
 

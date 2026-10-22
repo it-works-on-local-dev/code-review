@@ -17,7 +17,8 @@
 #       uses: it-works-on-local-dev/code-review/.github/workflows/claude-code-review.yml@v1
 #       secrets:
 #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-#         # or ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#         # and/or ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}; with both, a /review line
+#         # can pick one
 #         REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
 #       with:
 #         review-app-client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
@@ -71,6 +72,13 @@ on:
         description: Effort used when a review request names none.
         type: string
         default: xhigh
+      default-credential:
+        description: >-
+          Claude credential used when a review request names none: oauth (CLAUDE_CODE_OAUTH_TOKEN),
+          api-key (ANTHROPIC_API_KEY), or auto, which takes whichever secret the caller passes, and
+          the API key when it passes both.
+        type: string
+        default: auto
       approve:
         description: >-
           Submit a GitHub approval on the reviewed head when a review is clean, and dismiss the review
@@ -102,7 +110,8 @@ on:
     # stub stops passing the old one.
     # This repository's README documents the procedure.
     secrets:
-      # One of the two Claude credentials is required; the request job fails early without either
+      # One of the two Claude credentials is required; the request job fails early without either.
+      # With both, a review request picks one, and default-credential decides when it names neither.
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
       ANTHROPIC_API_KEY:
@@ -146,11 +155,13 @@ jobs:
       # anything they leave out uses the caller's defaults
       DEFAULT_MODEL: ${{ inputs.default-model }}
       DEFAULT_EFFORT: ${{ inputs.default-effort }}
+      DEFAULT_CREDENTIAL: ${{ inputs.default-credential }}
     outputs:
       review: ${{ steps.read.outputs.review }}
       base: ${{ steps.read.outputs.base }}
       model: ${{ steps.read.outputs.model }}
       effort: ${{ steps.read.outputs.effort }}
+      credential: ${{ steps.read.outputs.credential }}
     steps:
       # Comments are posted as the custom app's bot, not claude[bot]
       - name: Generate reviewer app token
@@ -169,8 +180,9 @@ jobs:
           REVIEW_APP_SLUG: ${{ inputs.review-app-slug }}
           RUNS_ON: ${{ inputs.runs-on }}
           ACTOR: ${{ github.actor }}
-          # Only whether a Claude credential is set reaches the shell, never its value
-          HAS_CREDENTIAL: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
+          # Only whether each Claude credential is set reaches the shell, never its value
+          HAS_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         run: |
           # Errors also go to an output, so a failed /review can say why
           fail() {
@@ -179,8 +191,8 @@ jobs:
             exit 1
           }
           # In a comment or the description, a line starting with "/review" is
-          # a review request. It must read "/review [model] [effort]" (either
-          # order, each optional). Only known-safe values get through.
+          # a review request. It must read "/review [model] [effort] [credential]"
+          # (any order, each optional). Only known-safe values get through.
           request='^[[:space:]]*/review([[:space:]]|$)'
           # A mention of the review app's whole login. Without a valid slug there is no pattern, and
           # thanked() below matches nothing, so neither a bare @ nor a partial login counts.
@@ -196,6 +208,7 @@ jobs:
           thank_word='(^|[^[:alpha:]])thank'
           models='^(opus|sonnet|haiku|fable|best|claude-[a-z0-9]+(-[a-z0-9]+)*)$'
           efforts='^(low|medium|high|xhigh|max)$'
+          credentials='^(oauth|api-key)$'
           # The last request line, so an example earlier in the text doesn't count
           request_line() {
             local l line=
@@ -218,24 +231,51 @@ jobs:
             done
             return 1
           }
-          # Reads a request line into $model and $effort. On anything that
-          # doesn't fit the format it sets $problem and returns 1.
+          # Reads a request line into $model, $effort and $credential, which stays empty when the
+          # line names none. On anything that doesn't fit the format it sets $problem and returns 1.
           parse_request() {
             local words word seen_model='' seen_effort=''
             read -r -a words <<< "$(printf '%s' "${1,,}" | tr -s '[:space:]' ' ')"
-            model=$DEFAULT_MODEL; effort=$DEFAULT_EFFORT; problem=
+            model=$DEFAULT_MODEL; effort=$DEFAULT_EFFORT; credential=; problem=
             for word in "${words[@]:1}"; do
               if [[ $word =~ $efforts ]]; then
                 [ -z "$seen_effort" ] || { problem="A review request takes one effort level, got '$seen_effort' and '$word'."; return 1; }
                 effort=$word; seen_effort=$word
+              elif [[ $word =~ $credentials ]]; then
+                [ -z "$credential" ] || { problem="A review request takes one credential, got '$credential' and '$word'."; return 1; }
+                credential=$word
               elif [[ $word =~ $models ]]; then
                 [ -z "$seen_model" ] || { problem="A review request takes one model, got '$seen_model' and '$word'."; return 1; }
                 model=$word; seen_model=$word
               else
-                problem="Can't use '$word' in a review request. Use /review [model] [effort], e.g. /review fable max."
+                problem="Can't use '$word' in a review request. Use /review [model] [effort] [oauth|api-key], e.g. /review fable max."
                 return 1
               fi
             done
+          }
+          # Sets $credential to the one the review runs on: the one a request named ($1), or else
+          # default-credential, whose auto takes the API key when both are set, as the action does
+          # when it's given both. On a credential the caller doesn't pass it sets $problem and returns 1.
+          pick_credential() {
+            local wanted=${1:-$DEFAULT_CREDENTIAL} secret available
+            if [ "$wanted" = auto ]; then
+              # At least one is set, checked before any request is read
+              if [ "$HAS_API_KEY" = true ]; then wanted=api-key; else wanted=oauth; fi
+            fi
+            if [ "$wanted" = api-key ]; then
+              secret=ANTHROPIC_API_KEY; available=$HAS_API_KEY
+            else
+              secret=CLAUDE_CODE_OAUTH_TOKEN; available=$HAS_OAUTH_TOKEN
+            fi
+            if [ "$available" != true ]; then
+              if [ -n "$1" ]; then
+                problem="The request asks for $wanted, but the workflow isn't passed $secret."
+              else
+                problem="The workflow's default-credential is $wanted, but it isn't passed $secret."
+              fi
+              return 1
+            fi
+            credential=$wanted
           }
           if [ "$EVENT_NAME" = issue_comment ]; then
             if printf '%s\n' "$COMMENT_BODY" | thanked; then
@@ -253,6 +293,8 @@ jobs:
           DEFAULT_EFFORT=${DEFAULT_EFFORT,,}
           [[ $DEFAULT_MODEL =~ $models ]] || fail "The workflow's default-model '$DEFAULT_MODEL' isn't a model name."
           [[ $DEFAULT_EFFORT =~ $efforts ]] || fail "The workflow's default-effort '$DEFAULT_EFFORT' isn't low, medium, high, xhigh or max."
+          DEFAULT_CREDENTIAL=${DEFAULT_CREDENTIAL,,}
+          [[ $DEFAULT_CREDENTIAL =~ ^(auto|oauth|api-key)$ ]] || fail "The workflow's default-credential '$DEFAULT_CREDENTIAL' isn't auto, oauth or api-key."
           # The checks and review jobs run on fromJSON(runs-on), so it must be a label or a list of labels
           jq -e 'type == "string" or (type == "array" and length > 0 and all(.[]; type == "string"))' <<< "$RUNS_ON" > /dev/null 2>&1 \
             || fail "The workflow's runs-on isn't a JSON label string or array, e.g. '\"ubuntu-latest\"'."
@@ -261,7 +303,7 @@ jobs:
           # The review needs one of the two Claude credentials. Checked here, after the app token
           # exists and after a comment with no request line has left quietly, so an automatic run
           # fails before the checks and review jobs start and a /review comment gets a reply saying why.
-          [ "$HAS_CREDENTIAL" = true ] || fail "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
+          [ "$HAS_OAUTH_TOKEN" = true ] || [ "$HAS_API_KEY" = true ] || fail "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
           # The action only runs for an actor with write or admin access, or a bot, so anyone else
           # stops here, before the checks job, the review queue and the approval step
           if [[ $ACTOR != *'[bot]' ]]; then
@@ -277,24 +319,33 @@ jobs:
           fi
           echo "base=${info#* }" >> "$GITHUB_OUTPUT"
           if [ "$EVENT_NAME" = issue_comment ]; then
-            # Follow-up review: the request line must parse, or nothing runs
+            # Follow-up review: the request line must parse, and name a credential the caller
+            # passes, or nothing runs
             parse_request "$line" || fail "$problem"
+            pick_credential "$credential" || fail "$problem"
           else
             # First review: a missing or malformed request line in the
-            # description just means the defaults
+            # description just means the defaults, and a credential the caller
+            # doesn't pass means the default credential
             line=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' | request_line)
             if [ -n "$line" ] && ! parse_request "$line"; then
               echo "::warning::Ignoring the description's review line: $problem"
-              model=$DEFAULT_MODEL; effort=$DEFAULT_EFFORT
+              model=$DEFAULT_MODEL; effort=$DEFAULT_EFFORT; credential=
             fi
-            [ -n "$line" ] || { model=$DEFAULT_MODEL; effort=$DEFAULT_EFFORT; }
+            [ -n "$line" ] || { model=$DEFAULT_MODEL; effort=$DEFAULT_EFFORT; credential=; }
+            if [ -n "$credential" ] && ! pick_credential "$credential"; then
+              echo "::warning::Ignoring the description's credential: $problem"
+              credential=
+            fi
+            [ -n "$credential" ] || pick_credential "" || fail "$problem"
           fi
           {
             echo "model=$model"
             echo "effort=$effort"
+            echo "credential=$credential"
             echo "review=true"
           } >> "$GITHUB_OUTPUT"
-          echo "Reviewing with $model at $effort effort"
+          echo "Reviewing with $model at $effort effort, using $credential"
 
       - name: Say you're welcome
         if: always() && steps.read.outputs.thanks == 'true'
@@ -627,9 +678,10 @@ jobs:
       - id: claude
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
-          # The action uses whichever of the two credentials the caller set
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Only the credential the request job picked, so the other is never used: not even by the
+          # action's inline-comment classifier, which calls the API with the key whenever it has one
+          claude_code_oauth_token: ${{ needs.request.outputs.credential == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          anthropic_api_key: ${{ needs.request.outputs.credential == 'api-key' && secrets.ANTHROPIC_API_KEY || '' }}
           github_token: ${{ steps.app-token.outputs.token }}
           bot_id: ${{ steps.bot.outputs.id }}
           bot_name: ${{ steps.app-token.outputs.app-slug }}[bot]
