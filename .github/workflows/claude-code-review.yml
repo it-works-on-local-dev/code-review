@@ -17,6 +17,7 @@
 #       uses: it-works-on-local-dev/code-review/.github/workflows/claude-code-review.yml@v1
 #       secrets:
 #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+#         # or ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 #         REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
 #       with:
 #         review-app-client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
@@ -81,9 +82,11 @@ on:
         description: >-
           The runner for the checks and review jobs, as JSON: a label string such as
           '"ubuntu-latest"', or an array of labels such as '["self-hosted", "linux"]'. A self-hosted
-          runner must be ephemeral, taking one job and then being replaced: the checks job runs the
-          PR's code, and the review job holds the app key and the Claude credential, so code left
-          behind on a reused runner could reach a later review's secrets.
+          runner must run each job on a freshly provisioned VM or container that is thrown away after
+          the job and can't reach outside itself: no mounted host Docker socket and no privileged
+          containers such as ARC's dind mode, otherwise a new VM per job. --ephemeral or just-in-time
+          registration on reused hardware isn't enough: the checks job runs the PR's code, and the
+          review job holds the app key and the Claude credential.
         type: string
         default: '"ubuntu-latest"'
     # Callers pass each secret by name rather than with secrets: inherit, so this workflow, called
@@ -116,10 +119,12 @@ jobs:
   request:
     # Automatic: non-draft PRs from this repo, except ones opened by bots
     # (the action refuses bot actors unless they're listed in allowed_bots).
-    # On request: a comment with /review, or a mention of @<review-app-slug>
-    # when the caller sets one, from someone with write access; the step
-    # below decides what, if anything, it asks for. Closed and merged PRs can
-    # be reviewed on request too.
+    # On request: a comment with /review from an owner, member or
+    # collaborator; the step below decides what, if anything, it asks for,
+    # and a request also needs write or admin access. A mention of
+    # @<review-app-slug>, when the caller sets one, only lets a thank-you
+    # reach that step for its 🎉. Closed and merged PRs can be reviewed on
+    # request too.
     if: >-
       (github.event_name == 'pull_request' &&
         github.event.pull_request.draft == false &&
@@ -162,6 +167,7 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
           REVIEW_APP_SLUG: ${{ inputs.review-app-slug }}
           RUNS_ON: ${{ inputs.runs-on }}
+          ACTOR: ${{ github.actor }}
           # Only whether a Claude credential is set reaches the shell, never its value
           HAS_CREDENTIAL: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
         run: |
@@ -255,6 +261,13 @@ jobs:
           # exists and after a comment with no request line has left quietly, so an automatic run
           # fails before the checks and review jobs start and a /review comment gets a reply saying why.
           [ "$HAS_CREDENTIAL" = true ] || fail "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
+          # The action only runs for an actor with write or admin access, or a bot, so anyone else
+          # stops here, before the checks job, the review queue and the approval step
+          if [[ $ACTOR != *'[bot]' ]]; then
+            permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$ACTOR/permission" --jq .permission) || permission=
+            [[ $permission == admin || $permission == write ]] \
+              || fail "A review needs write or admin access on this repository, and $ACTOR doesn't have it."
+          fi
           # A comment payload doesn't say where the PR comes from or merges into
           info=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isCrossRepository,baseRefName --jq '"\(.isCrossRepository) \(.baseRefName)"')
           if [ "${info%% *}" = true ]; then
