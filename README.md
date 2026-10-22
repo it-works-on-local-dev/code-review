@@ -25,7 +25,7 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 **When it reviews.**
 
 - **By itself.** When a pull request opens, or each time it's marked ready for review, it reviews the PR if the PR is not a draft, its branch is in the same repository, and it was not opened by a bot. Such a review replaces a review still running for the PR.
-- **On request, after that.** It also reviews again when someone with write or admin access on the repository comments on the PR with a line starting `/review`. The workflow accepts a comment from the repository's owner, a member of the organisation that owns it, or a collaborator on it (a comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`), then checks the commenter's repository permission itself. An owner, member or collaborator without write or admin access gets a reply starting `Claude review request failed:` from the workflow's first job, and nothing else runs. A `/review` from anyone else is ignored, with no reply. The line may name a model and an effort, in either order: `/review`, `/review sonnet`, `/review high`, `/review opus max` and `/review max opus` all work. If it cannot parse the request it replies with a comment starting `Claude review request failed:` and does not review.
+- **On request.** It reviews when someone with write or admin access on the repository comments on the PR with a line starting `/review`. A request reaches any PR whose branch is in the repository, including the ones the automatic review skips: drafts, PRs opened by Dependabot or another bot, PRs into a branch other than the one your stub names, and closed or merged PRs. It's the usual way to get a Dependabot PR reviewed. The workflow accepts a comment from the repository's owner, a member of the organisation that owns it, or a collaborator on it (a comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`), then checks the commenter's repository permission itself. An owner, member or collaborator without write or admin access gets a reply starting `Claude review request failed:` from the workflow's first job, and nothing else runs. A `/review` from anyone else is ignored, with no reply. The line may name a model and an effort, in either order: `/review`, `/review sonnet`, `/review high`, `/review opus max` and `/review max opus` all work. If it cannot parse the request it replies with a comment starting `Claude review request failed:` and does not review.
 - **Not with a mention.** Only a `/review` line requests a review. If you set `review-app-slug`, a comment that mentions `@<slug>` from any owner, organisation member or collaborator, with or without write access, also reaches the workflow, so a thank-you to the bot gets a 🎉 reaction. A comment with a `/review` line is reviewed whether or not it also mentions or thanks the bot, so a thank-you with a `/review` line gets both. Without `review-app-slug`, nothing gets the 🎉.
 - **Never for forks.** A pull request whose branch lives in a fork is never reviewed, automatically or on request.
 
@@ -54,7 +54,7 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 
    A review with no findings has the heading `### No issues found! 🚀` instead.
 
-**Models and effort.** A review uses `default-model` and `default-effort` unless the request names others. A model may be an alias (`opus`, `sonnet`, `haiku`, `fable` or `best`) or a full model ID. An alias resolves to the newest model of that name known to the Claude Code inside the pinned [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action). Dependabot keeps that pin current in this repository, which is how an alias moves on to a newer model without you changing anything.
+**Models and effort.** A review uses `default-model` and `default-effort` unless the request names others. For the automatic review, the request is the PR description's last line starting `/review`, read the same way as a comment's (`/review haiku low`, `/review opus max`), and anything it leaves out uses the defaults. A description line the workflow can't parse is ignored, with only a warning in the run log, and the review uses the defaults. A model may be an alias (`opus`, `sonnet`, `haiku`, `fable` or `best`) or a full model ID. An alias resolves to the newest model of that name known to the Claude Code inside the pinned [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action). Dependabot keeps that pin current in this repository, which is how an alias moves on to a newer model without you changing anything.
 
 ## How it keeps secrets away from PR code
 
@@ -142,6 +142,17 @@ Self-hosted runners must give each job a freshly provisioned VM or container tha
 jobs:
   runner:
     name: Runner
+    # The workflow's request job's filter, so the picker starts only when a review might follow
+    if: >-
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.type != 'Bot') ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        (contains(github.event.comment.body, '/review') ||
+          contains(github.event.comment.body, '@my-review-app')) &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     permissions: {}
     uses: it-works-on-local-dev/runners/.github/workflows/pick-runner.yml@main
     secrets:
@@ -166,7 +177,7 @@ jobs:
         run_step check lint npm run lint
 ```
 
-The `name`, `on` and the rest of the file are as in the hosted stub. With this shape the picker's checks show as `Code Review / Runner / …` beside `Code Review / Claude / …`. Any job of your own that outputs a JSON label string or array works the same way, and `RUNNER_STATUS_TOKEN` belongs to the picker, not to this workflow.
+The `name`, `on` and the rest of the file are as in the hosted stub. The `runner` job's `if:` copies the workflow's own filter for the events it acts on, with the example's `my-review-app` slug in place of `review-app-slug`, so the picker doesn't start for every comment on every issue and PR. When the picker is skipped, the review job, which needs it, is skipped too, as intended. If the picker fails, the review is skipped with no reply to the `/review`. With this shape the picker's checks show as `Code Review / Runner / …` beside `Code Review / Claude / …`. Any job of your own that outputs a JSON label string or array works the same way, and `RUNNER_STATUS_TOKEN` belongs to the picker, not to this workflow.
 
 ### Let /iwol:setup write the stub
 
@@ -182,7 +193,7 @@ The `iwol` Claude Code plugin, from [it-works-on-local-dev/skills](https://githu
 | `checks` | yes | | Shell run in the checks job after Node is set up, one step per line, written `run_step <setup\|check> <name> <command...>`. A `setup` step adds a summary line only when it fails; a `check` step always adds a pass or FAIL line. A name may use only letters, digits, `.`, `_` and `-`. |
 | `review-app-client-id` | yes | | The review app's client ID, normally the `REVIEW_APP_CLIENT_ID` repository variable. |
 | `review-app-slug` | no | empty | The app's login without `[bot]`. With it set, a comment mentioning `@<slug>` also reaches the workflow, so a thank-you to the bot gets a 🎉. Only a `/review` line starts a review, with or without it. |
-| `runs-on` | no | `"ubuntu-latest"` | A JSON label string or JSON array of labels for the machine the checks and review jobs run on. |
+| `runs-on` | no | `"ubuntu-latest"` | A JSON label string or JSON array of labels for the machine the checks and review jobs run on. In YAML, quote the JSON: `runs-on: '"ubuntu-24.04"'` or `runs-on: '["self-hosted", "linux"]'`. An expression whose output is already JSON, such as the self-hosted example's `${{ needs.runner.outputs.linux }}`, is passed as it is. |
 | `default-model` | no | `opus` | The model used when a request names none: an alias or a full model ID. |
 | `default-effort` | no | `xhigh` | The effort used when a request names none. |
 | `approve` | no | `false` | Approve the reviewed head when a review is clean, and dismiss the bot's earlier approvals when one is not. See [Approving clean reviews](#approving-clean-reviews). |
@@ -209,7 +220,7 @@ With `approve: true`, a clean review also submits a GitHub approval on the head 
 - every review thread the bot started is resolved, and
 - the PR is still open and not a draft at the reviewed head.
 
-**Never let this approval count toward required reviews, on any plan.** Whoever writes a pull request can obtain it: the reviewer reads the PR's own diff, and the checks are the PR's own scripts, so the author controls everything the verdict rests on. Treat the approval as a visible signal only. Where your branch protection or rulesets require approvals, also require one from a person or team, through Code Owners or a ruleset's required reviewers. Do not remove the app's permissions instead: it needs them to post the review.
+**Never let this approval count toward required reviews, on any plan.** Whoever writes a pull request can obtain it: the reviewer reads the PR's own diff, and the checks are the PR's own scripts, so the author controls everything the verdict rests on. The author can even pick the automatic review's model and effort, with a `/review` line in the PR description. Treat the approval as a visible signal only. Where your branch protection or rulesets require approvals, also require one from a person or team, through Code Owners or a ruleset's required reviewers. Do not remove the app's permissions instead: it needs them to post the review.
 
 ## Versioning
 
