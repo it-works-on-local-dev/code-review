@@ -248,6 +248,3 @@ This section is for changing the workflow itself. Stubs pass secrets by name, wh
 
 **Removing or renaming a secret** is the reverse, and riskier. A stub that still passes the old name stops working the moment `v1` moves to the release that dropped it. Either keep the old name declared as optional until every stub has stopped passing it, or make the removal a major release. A rename is an addition followed, later, by a removal.
 
-## Archive
-
-The workflow's history before this repository, including its 31 pull requests, is in the private [it-works-on-local-dev/tooling](https://github.com/it-works-on-local-dev/tooling) repository.
