@@ -14,7 +14,6 @@ A reusable GitHub Actions workflow, [`.github/workflows/claude-code-review.yml`]
 - [Approving clean reviews](#approving-clean-reviews)
 - [Versioning](#versioning)
 - [Adding and removing a secret](#adding-and-removing-a-secret)
-- [Archive](#archive)
 
 The comments in the workflow file are the authority on how each step works. This README covers what you need to use it.
 
@@ -247,4 +246,3 @@ This section is for changing the workflow itself. Stubs pass secrets by name, wh
 - the stub template in the setup skill of [it-works-on-local-dev/skills](https://github.com/it-works-on-local-dev/skills), which must change in step with this repository.
 
 **Removing or renaming a secret** is the reverse, and riskier. A stub that still passes the old name stops working the moment `v1` moves to the release that dropped it. Either keep the old name declared as optional until every stub has stopped passing it, or make the removal a major release. A rename is an addition followed, later, by a removal.
-
