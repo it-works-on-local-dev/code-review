@@ -73,7 +73,7 @@ You need a GitHub App for the review to post as, a stub workflow that calls this
 ### Create the GitHub App
 
 1. Create a GitHub App, under your user or organisation's **Settings → Developer settings → GitHub Apps → New GitHub App**. Its name gives it a slug, its login without `[bot]`, and reviews will be posted as `<app slug>[bot]`. You can leave the webhook inactive.
-2. Under **Repository permissions**, set **Pull requests** and **Issues** to **Read and write**. The review needs them to post comments and reactions, and to submit and dismiss approvals.
+2. Under **Repository permissions**, set **Contents** to **Read-only**, and **Pull requests** and **Issues** to **Read and write**. The review fetches your base branch with the app's token, which a private repository refuses without Contents, and needs the other two to post comments and reactions, and to submit and dismiss approvals.
 3. Create the app, note its **Client ID**, and generate a **private key** (a `.pem` file).
 4. Install the app on the repository you want reviewed.
 5. Store the client ID and private key in that repository:
