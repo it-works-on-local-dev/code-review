@@ -512,6 +512,9 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    outputs:
+      # Claude's own error when its run failed, for report-failure's reply; empty when there's none
+      error: ${{ steps.claude-error.outputs.error }}
     # Runs no PR code, since the app and Claude tokens exist here: the checks job ran it.
     steps:
       # The reviewer's read-only commands only check the paths they're given, so a PR's symlink to
@@ -735,6 +738,45 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment"
             --disallowedTools "Read(//proc/**),Bash(gh:*)"
             --json-schema '{"type":"object","properties":{"findings":{"type":"array","items":{"type":"string","minLength":1}},"note":{"type":"string","minLength":1},"complete":{"type":"boolean"}},"required":["findings","note","complete"],"additionalProperties":false}'
+
+      # When Claude's run itself ends in an error, such as "Credit balance is too low" or a usage
+      # limit, which a retry won't fix, the action only says it got no structured output. The
+      # execution log's result entry says why: shown here as an annotation on the red check and in
+      # the job summary, and passed to report-failure as the job's error output for a requested
+      # review's reply. A comment for an automatic review would outlive a successful gh run rerun.
+      # The text is untrusted, so it's only ever data: jq makes it one line of at most 200
+      # characters, swaps backticks for quotes so the reply can quote it, and redacts every long
+      # token-like word, and GitHub masks any secret it knows in the annotation and summary, and
+      # drops a job output holding one. Anything else (a timeout, a cancelled run) leaves it empty.
+      - name: Read Claude's error
+        id: claude-error
+        if: failure() && steps.claude.outcome == 'failure'
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          [ -f "$EXECUTION_FILE" ] || exit 0
+          # The backtick is jq's, so the program stays single-quoted
+          # shellcheck disable=SC2016
+          error=$(jq -r '
+            [.[]? | objects | select(.type == "result")] | last // empty
+            | select(.is_error == true) | .result | strings
+            | gsub("[\\p{C}\\s]+"; " ") | sub("^ "; "") | sub(" $"; "")
+            | gsub("`"; "'"'"'")
+            | gsub("[A-Za-z0-9+/=_-]{32,}"; "[redacted]")
+            | if length > 200 then (.[:200] | sub(" +$"; "")) + "…" else . end
+            | select(. != "")' "$EXECUTION_FILE" 2> /dev/null) || error=
+          [ -n "$error" ] || exit 0
+          echo "error=$error" >> "$GITHUB_OUTPUT"
+          # A workflow command's message turns %0A into a line break, so % is escaped
+          printf '::error title=Claude review failed::%s\n' "${error//%/%25}"
+          {
+            echo '### Claude review failed'
+            echo
+            echo '~~~text'
+            printf '%s\n' "$error"
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Posted by the workflow, so the comment can only go to this PR on github.com. That works on a
       # merged PR as well as an open one. The workflow assembles it, so its shape doesn't depend on
@@ -960,7 +1002,10 @@ jobs:
 
   # A requested review that fails, times out or is cancelled would otherwise
   # leave only the 👀 behind, since comment-triggered runs show no check. Every
-  # automatic review, and every requested one that finishes, skips this job
+  # automatic review, and every requested one that finishes, skips this job:
+  # an automatic review's red check carries Claude's error as an annotation.
+  # The reply quotes that error when the review job read one, and otherwise
+  # names the usual causes
   report-failure:
     needs: [request, review]
     if: >-
@@ -981,7 +1026,15 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RESULT: ${{ needs.review.result }}
+          # Already one short line with no backticks, from the review job's "Read Claude's error"
+          ERROR: ${{ needs.review.outputs.error }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          printf 'Claude review didn'"'"'t finish (%s). It may have hit the 60-minute limit, or a newer review replaced it.\n\nRun: %s\n' "$RESULT" "$RUN_URL" > "$RUNNER_TEMP/review-unfinished.md"
+          # The backticks are Markdown, so the format stays single-quoted
+          # shellcheck disable=SC2016
+          if [ -n "$ERROR" ]; then
+            printf 'Claude review didn'"'"'t finish (%s). Claude stopped with an error: `%s`\n\nRun: %s\n' "$RESULT" "$ERROR" "$RUN_URL"
+          else
+            printf 'Claude review didn'"'"'t finish (%s). It may have hit the 60-minute limit, or a newer review replaced it.\n\nRun: %s\n' "$RESULT" "$RUN_URL"
+          fi > "$RUNNER_TEMP/review-unfinished.md"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/review-unfinished.md"
