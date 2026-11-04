@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.1](https://github.com/it-works-on-local-dev/code-review/compare/v1.2.0...v1.2.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **deps:** bump anthropics/claude-code-action from 1.0.262 to 1.0.266 ([#20](https://github.com/it-works-on-local-dev/code-review/issues/20)) ([3e77474](https://github.com/it-works-on-local-dev/code-review/commit/3e774743c69583cc02a992e12990f26be1d674f5))
+* **deps:** ship claude-code-action 1.0.262 and release each Dependabot bump ([#18](https://github.com/it-works-on-local-dev/code-review/issues/18)) ([4573ba5](https://github.com/it-works-on-local-dev/code-review/commit/4573ba548aa1c4735834af693ca0fbefbba41b13))
+
 ## [1.2.0](https://github.com/it-works-on-local-dev/code-review/compare/v1.1.0...v1.2.0) (2026-10-24)
 
 
