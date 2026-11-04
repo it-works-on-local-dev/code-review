@@ -679,7 +679,7 @@ jobs:
 
       # Pinned to a commit: this action receives both the Claude and app tokens
       - id: claude
-        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
+        uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         with:
           # Only the credential the request job picked, so the other is never used: not even by the
           # action's inline-comment classifier, which calls the API with the key whenever it has one
