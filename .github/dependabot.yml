@@ -1,9 +1,15 @@
 # The review workflow pins anthropics/claude-code-action to a commit, and that action installs the
 # Claude Code version its own release names, so a model alias such as opus only moves on to a newer
 # model when the pin does. This opens a PR each week for every action with a newer release.
+#
+# A stub at @v1 only sees a new pin once the v1 tag moves, and release-please releases nothing for
+# a chore commit, so the PRs are titled fix(deps) to make each merged bump cut a patch release.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: fix
+      include: scope
