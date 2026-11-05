@@ -996,7 +996,17 @@ jobs:
       # whichever engine wrote it, is one file in the outgoing directory, and this step checks each
       # one for credential-shaped strings: a three-part JSON Web Token, or a key with OpenAI's sk-
       # prefix (which covers Anthropic's sk-ant-) or one of GitHub's ghp_, gho_, ghu_, ghs_, ghr_ and
-      # github_pat_. A step that posts another text, such as an inline comment body, writes it into
+      # github_pat_. The bare sk- pattern needs a word boundary before it, so kebab-case words like
+      # task-runner-... don't match. The vendor-prefixed sk-ant-, sk-proj-, sk-svcacct- and sk-admin-
+      # keys and the GitHub prefixes match wherever they appear, even glued to a word; the vendor
+      # pattern asks for 40 or more characters after its prefix (real keys are far longer), so a
+      # kebab-case name like helpdesk-admin-notification-preferences doesn't match and only a very
+      # long one would. The ghp_-style prefixes ask for 20 or more letters and digits, and
+      # github_pat_ asks for 40 or more (real fine-grained tokens carry 82), so a snake_case name
+      # like github_pat_for_release_workflow doesn't match. Each of a token's three parts needs 15
+      # or more characters (after eyJ, for the first), so a property chain like
+      # publicKeyJwk.kty.toUpperCase() doesn't match.
+      # A step that posts another text, such as an inline comment body, writes it into
       # the directory as its own file before this step and posts it only when clean is true.
       # On a match the workflow posts none of those texts and the log isn't uploaded: the step
       # fails, the next one posts a notice without the string, and the approval step finds no posted
@@ -1006,8 +1016,10 @@ jobs:
       # log, the check output and the diffs). A match there only stops the upload (log-clean isn't
       # set) and leaves the summary alone, so it warns instead of failing the step.
       # The texts and files are only ever grep's data, only file names are printed, never the
-      # matched string, and a grep error counts as a match. With no texts, such as after a failed
-      # engine step, it's clean, so the log still uploads.
+      # matched string, and a grep error counts as a match. Every entry in the outgoing directory,
+      # dotfiles included, is scanned, and one that isn't a regular file (a subdirectory, a symlink
+      # to one) is withheld unscanned, so nothing there is skipped. With no texts, such as after a
+      # failed engine step, it's clean, so the log still uploads.
       - name: Scrub the review output
         id: scrub
         if: always()
@@ -1018,10 +1030,11 @@ jobs:
           DIFF_DIR: ${{ runner.temp }}/pr-diff
         run: |
           patterns=(
-            -e 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+            -e 'eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}'
             -e '(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}'
-            -e '(^|[^A-Za-z0-9_])(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}'
-            -e '(^|[^A-Za-z0-9_])github_pat_[A-Za-z0-9_]{20,}'
+            -e 'sk-(ant|proj|svcacct|admin)-[A-Za-z0-9_-]{40,}'
+            -e '(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}'
+            -e 'github_pat_[A-Za-z0-9_]{40,}'
           )
           # The files the log upload would carry; -l prints only the names of matching files
           log_paths=()
@@ -1048,18 +1061,26 @@ jobs:
           fi
           mkdir -p "$OUTGOING_DIR"
           withheld=()
+          # dotglob so dotfiles are scanned; an empty directory leaves the literal glob, which
+          # neither exists nor is a symlink, so it's skipped. A non-regular entry is withheld.
+          shopt -s dotglob
           for text in "$OUTGOING_DIR"/*; do
-            [ -f "$text" ] || continue
-            LC_ALL=C grep -qE "${patterns[@]}" -- "$text" && code=0 || code=$?
+            [ -e "$text" ] || [ -L "$text" ] || continue
+            if [ -f "$text" ]; then
+              LC_ALL=C grep -qE "${patterns[@]}" -- "$text" && code=0 || code=$?
+            else
+              code=2
+            fi
             [ "$code" -eq 1 ] || withheld+=("${text##*/}")
           done
+          shopt -u dotglob
           if [ "${#withheld[@]}" -eq 0 ]; then
             echo "clean=true" >> "$GITHUB_OUTPUT"
             echo "No credential-shaped string in the review output."
             exit 0
           fi
           echo "withheld=true" >> "$GITHUB_OUTPUT"
-          echo "::error title=Review summary withheld::${withheld[*]} contained a credential-shaped string, so the review summary was withheld and the review log wasn't uploaded."
+          echo "::error title=Review summary withheld::${withheld[*]} contained a credential-shaped string or couldn't be scanned, so the review summary was withheld and the review log wasn't uploaded."
           exit 1
 
       # One notice in place of the withheld summary, with the run link and never the matched string.
