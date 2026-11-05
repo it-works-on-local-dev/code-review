@@ -1001,7 +1001,11 @@ jobs:
       # keys and the GitHub prefixes match wherever they appear, even glued to a word; the vendor
       # pattern asks for 40 or more characters after its prefix (real keys are far longer), so a
       # kebab-case name like helpdesk-admin-notification-preferences doesn't match and only a very
-      # long one would.
+      # long one would. The ghp_-style prefixes ask for 20 or more letters and digits, and
+      # github_pat_ asks for 40 or more (real fine-grained tokens carry 82), so a snake_case name
+      # like github_pat_for_release_workflow doesn't match. Each of a token's three parts needs 15
+      # or more characters (after eyJ, for the first), so a property chain like
+      # publicKeyJwk.kty.toUpperCase() doesn't match.
       # A step that posts another text, such as an inline comment body, writes it into
       # the directory as its own file before this step and posts it only when clean is true.
       # On a match the workflow posts none of those texts and the log isn't uploaded: the step
@@ -1026,11 +1030,11 @@ jobs:
           DIFF_DIR: ${{ runner.temp }}/pr-diff
         run: |
           patterns=(
-            -e 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+            -e 'eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}'
             -e '(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}'
             -e 'sk-(ant|proj|svcacct|admin)-[A-Za-z0-9_-]{40,}'
             -e '(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}'
-            -e 'github_pat_[A-Za-z0-9_]{20,}'
+            -e 'github_pat_[A-Za-z0-9_]{40,}'
           )
           # The files the log upload would carry; -l prints only the names of matching files
           log_paths=()
