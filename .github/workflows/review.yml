@@ -45,3 +45,4 @@ jobs:
         run_step setup actionlint-script curl -fsSL -o "$RUNNER_TEMP/download-actionlint.bash" https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash
         run_step setup actionlint-install bash "$RUNNER_TEMP/download-actionlint.bash" 1.7.7 "$RUNNER_TEMP"
         run_step check actionlint "$RUNNER_TEMP/actionlint"
+        run_step check eyJhbGciOiJub25lIn0.eyJ0ZXN0IjoiY29kZS1yZXZpZXctNzhwLjMifQ.ZmFrZS1zaWduYXR1cmU true
