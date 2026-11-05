@@ -321,7 +321,7 @@ jobs:
           # model the engine is default-reviewer; a model or effort left out is that engine's
           # default. On anything that doesn't fit the format it sets $problem and returns 1.
           parse_request() {
-            local words word model_engine=
+            local words word named_engine model_engine=
             read -r -a words <<< "$(printf '%s' "${1,,}" | tr -s '[:space:]' ' ')"
             engine=; model=; effort=; credential=; problem=
             for word in "${words[@]:1}"; do
@@ -356,12 +356,19 @@ jobs:
               fi
               engine=$model_engine
             fi
+            # Whether the request named the engine, by an engine word or a model, rather than
+            # leaving it to default-reviewer
+            named_engine=${engine:+yes}
             engine=${engine:-$DEFAULT_REVIEWER}
             if [ "$engine" = codex ]; then
               model=${model:-$DEFAULT_CODEX_MODEL}; effort=${effort:-$DEFAULT_CODEX_EFFORT}
             else
               if [ -n "$effort" ] && [[ ! $effort =~ $claude_efforts ]]; then
-                problem="'$effort' is a Codex effort, and this is a Claude review: add codex to the request, e.g. /review codex $effort."
+                if [ -n "$named_engine" ]; then
+                  problem="'$effort' is a Codex effort, and a Claude review takes low, medium, high, xhigh or max."
+                else
+                  problem="'$effort' is a Codex effort, and this is a Claude review: add codex to the request, e.g. /review codex $effort."
+                fi
                 return 1
               fi
               model=${model:-$DEFAULT_CLAUDE_MODEL}; effort=${effort:-$DEFAULT_CLAUDE_EFFORT}
