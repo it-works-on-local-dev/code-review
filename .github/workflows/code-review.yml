@@ -996,9 +996,12 @@ jobs:
       # whichever engine wrote it, is one file in the outgoing directory, and this step checks each
       # one for credential-shaped strings: a three-part JSON Web Token, or a key with OpenAI's sk-
       # prefix (which covers Anthropic's sk-ant-) or one of GitHub's ghp_, gho_, ghu_, ghs_, ghr_ and
-      # github_pat_. Only the bare sk- pattern needs a word boundary before it, so words like
-      # task-runner-... don't match; the vendor-prefixed sk-ant-, sk-proj-, sk-svcacct- and sk-admin-
-      # keys and the GitHub prefixes match wherever they appear, even glued to a word.
+      # github_pat_. The bare sk- pattern needs a word boundary before it, so kebab-case words like
+      # task-runner-... don't match. The vendor-prefixed sk-ant-, sk-proj-, sk-svcacct- and sk-admin-
+      # keys and the GitHub prefixes match wherever they appear, even glued to a word; the vendor
+      # pattern asks for 40 or more characters after its prefix (real keys are far longer), so a
+      # kebab-case name like helpdesk-admin-notification-preferences doesn't match and only a very
+      # long one would.
       # A step that posts another text, such as an inline comment body, writes it into
       # the directory as its own file before this step and posts it only when clean is true.
       # On a match the workflow posts none of those texts and the log isn't uploaded: the step
@@ -1025,7 +1028,7 @@ jobs:
           patterns=(
             -e 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
             -e '(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}'
-            -e 'sk-(ant|proj|svcacct|admin)-[A-Za-z0-9_-]{20,}'
+            -e 'sk-(ant|proj|svcacct|admin)-[A-Za-z0-9_-]{40,}'
             -e '(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}'
             -e 'github_pat_[A-Za-z0-9_]{20,}'
           )
