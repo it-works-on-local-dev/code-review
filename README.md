@@ -68,7 +68,7 @@ Anything a request leaves out uses the engine's own defaults: `default-claude-mo
 
 The `default-reviewer` must have a credential in your stub, or the run fails early. A request that names an engine whose credential your stub doesn't pass gets a reply naming that engine's two secrets, and a request naming a credential your stub doesn't pass is refused the same way. The review is handed only the credential it runs on, so the other is never used, not even by the action's inline-comment classifier, which calls the API with the key whenever it has one.
 
-For the automatic review, the request is the PR description's last line starting `/review`, read the same way as a comment's (`/review haiku low`, `/review codex max`, which fails until Codex is available). A comment's failed request gets a `Review request failed:` reply; the description's line is lenient: a line the workflow can't parse is ignored, with only a warning in the run log, and the review uses the defaults.
+For the automatic review, the request is the PR description's last line starting `/review`, read the same way as a comment's (`/review haiku low`, `/review codex max`: Codex isn't available yet, so if your stub passes no Codex secret that line is ignored with a warning and the defaults apply, and if it passes one the run fails until Codex is available). A comment's failed request gets a `Review request failed:` reply; the description's line is lenient: a line the workflow can't parse is ignored, with only a warning in the run log, and the review uses the defaults.
 
 ## How it keeps secrets away from PR code
 
@@ -219,9 +219,9 @@ The `iwol` Claude Code plugin, from [it-works-on-local-dev/skills](https://githu
 | `default-claude-model` | no | `opus` | The model a Claude review uses when its request names none: an alias or a full model ID. |
 | `default-claude-effort` | no | `xhigh` | The effort a Claude review uses when its request names none: `low`, `medium`, `high`, `xhigh` or `max`. |
 | `default-claude-credential` | no | `auto` | The credential a Claude review uses when its request names none: `sub` (`CLAUDE_CODE_OAUTH_TOKEN`), `api` (`ANTHROPIC_API_KEY`), or `auto`, which takes whichever of the two your stub passes, and the API key when it passes both. |
-| `default-codex-model` | no | `gpt-6.1-sol` | The model a Codex review will use when its request names none: a `gpt-` model. Codex isn't available yet, so nothing reads it today. |
-| `default-codex-effort` | no | `xhigh` | The effort a Codex review uses when its request names none: `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. |
-| `default-codex-credential` | no | `auto` | The credential a Codex review uses when its request names none: `sub` (`CODEX_AUTH_JSON`), `api` (`OPENAI_API_KEY`), or `auto`, which takes whichever of the two your stub passes, and the API key when it passes both. |
+| `default-codex-model` | no | `gpt-6.1-sol` | The model a Codex review will use when its request names none: a `gpt-` model. Codex isn't available yet, but the value is checked on every run, so it must be a valid `gpt-` model even now: anything else fails every run. |
+| `default-codex-effort` | no | `xhigh` | The effort a Codex review uses when its request names none: `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Checked on every run, so it must be valid even before Codex is available. |
+| `default-codex-credential` | no | `auto` | The credential a Codex review uses when its request names none: `sub` (`CODEX_AUTH_JSON`), `api` (`OPENAI_API_KEY`), or `auto`, which takes whichever of the two your stub passes, and the API key when it passes both. Checked on every run, so it must be valid even before Codex is available. |
 | `approve` | no | `false` | Approve the reviewed head when a review is clean, and dismiss the bot's earlier approvals when one is not. See [Approving clean reviews](#approving-clean-reviews). |
 
 ## Secrets

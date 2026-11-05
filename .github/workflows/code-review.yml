@@ -683,6 +683,8 @@ jobs:
       error: ${{ steps.claude-error.outputs.error }}
       # true when the scrub withheld the review summary and the notice saying so was posted
       withheld-notice: ${{ steps.withheld-notice.outputs.posted }}
+      # true when the scrub withheld the review summary, for report-failure's reply when the notice wasn't posted
+      withheld: ${{ steps.scrub.outputs.withheld }}
     # Runs no PR code, since the app and Claude tokens exist here: the checks job ran it.
     steps:
       # The reviewer's read-only commands only check the paths they're given, so a PR's symlink to
@@ -1301,12 +1303,17 @@ jobs:
           ENGINE: ${{ needs.request.outputs.reviewer == 'codex' && 'Codex' || 'Claude' }}
           # Already one short line with no backticks, from the review job's "Read Claude's error"
           ERROR: ${{ needs.review.outputs.error }}
+          # true when the scrub withheld the summary but its notice wasn't posted
+          WITHHELD: ${{ needs.review.outputs.withheld }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # The backticks are Markdown, so the format stays single-quoted
           # shellcheck disable=SC2016
           if [ -n "$ERROR" ]; then
             printf 'Review didn'"'"'t finish (%s). %s stopped with an error: `%s`\n\nRun: %s\n' "$RESULT" "$ENGINE" "$ERROR" "$RUN_URL"
+          elif [ "$WITHHELD" = "true" ]; then
+            # Same wording as "Report withheld review output", never the matched string
+            printf 'Review output withheld: the review summary contained a credential-shaped string, so the summary wasn'"'"'t posted and the review log wasn'"'"'t uploaded.\n\nRun: %s\n' "$RUN_URL"
           else
             printf 'Review didn'"'"'t finish (%s). It may have hit the 60-minute limit, or a newer review replaced it.\n\nRun: %s\n' "$RESULT" "$RUN_URL"
           fi > "$RUNNER_TEMP/review-unfinished.md"
