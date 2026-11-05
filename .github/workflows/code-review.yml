@@ -681,6 +681,8 @@ jobs:
     outputs:
       # Claude's own error when its run failed, for report-failure's reply; empty when there's none
       error: ${{ steps.claude-error.outputs.error }}
+      # true when the scrub withheld the review's output, which already posted its own notice
+      withheld: ${{ steps.scrub.outputs.withheld }}
     # Runs no PR code, since the app and Claude tokens exist here: the checks job ran it.
     steps:
       # The reviewer's read-only commands only check the paths they're given, so a PR's symlink to
@@ -947,25 +949,26 @@ jobs:
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Posted by the workflow, so the comment can only go to this PR on github.com. That works on a
-      # merged PR as well as an open one. The workflow assembles it, so its shape doesn't depend on
-      # the reviewer: a heading counting the findings, one "- " line per finding, a "Partial review:"
-      # line unless the reviewer says it covered every changed file, the reviewer's note, the check
-      # lines and the footer, one blank line between blocks. A finding or note that
-      # spans lines is joined into one, so it can't break the list. The reviewer's output, the check
-      # lines and the model only ever reach jq as data. The footer names the engine, the model and
-      # the effort, then the reviewed head.
-      - name: Post the review summary
-        id: summary
+      # The workflow assembles the summary comment, so its shape doesn't depend on the reviewer: a
+      # heading counting the findings, one "- " line per finding, a "Partial review:" line unless the
+      # reviewer says it covered every changed file, the reviewer's note, the check lines and the
+      # footer, one blank line between blocks. A finding or note that spans lines is joined into one,
+      # so it can't break the list. The reviewer's output, the check lines and the model only ever
+      # reach jq as data. The footer names the engine, the model and the effort, then the reviewed
+      # head. It's written to the outgoing directory, which the scrub below checks before anything
+      # is posted.
+      - name: Compose the review summary
+        id: compose
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
           ENGINE: ${{ needs.request.outputs.reviewer == 'codex' && 'Codex' || 'Claude' }}
           MODEL: ${{ needs.request.outputs.model }}
           EFFORT: ${{ needs.request.outputs.effort }}
           REVIEWED_HEAD: ${{ steps.diff.outputs.head }}
           CHECKS_DIR: ${{ runner.temp }}/checks
+          OUTGOING_DIR: ${{ runner.temp }}/review-outgoing
         run: |
+          mkdir -p "$OUTGOING_DIR"
           checks=$CHECKS_DIR/summary.txt
           [ -f "$checks" ] || checks=/dev/null
           # The $ names below are jq variables, so the program stays single-quoted
@@ -984,8 +987,67 @@ jobs:
                 ($checks | split("\n") | map(sub("\\s+$"; "") | select(. != "")) | select(length > 0) | join("\n")),
                 "Reviewed by \($engine) with `\($model)` at `\($effort)` effort\nReviewed head: \($head)"
               ]
-            | join("\n\n")' > "$RUNNER_TEMP/review-summary.md"
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/review-summary.md"
+            | join("\n\n")' > "$OUTGOING_DIR/summary.md"
+
+      # The reviewer reads the PR, so a PR can steer it into quoting a secret it found in the
+      # checkout or its own environment. Every text the workflow is about to post from a review,
+      # whichever engine wrote it, is one file in the outgoing directory, and this step checks each
+      # one for credential-shaped strings: a three-part JSON Web Token, or a key with OpenAI's sk-
+      # prefix (which covers Anthropic's sk-ant-) or one of GitHub's ghp_, gho_, ghu_, ghs_, ghr_ and
+      # github_pat_. A step that posts another text, such as an inline comment body, writes it into
+      # the directory as its own file before this step and posts it only when clean is true.
+      # On a match nothing from the review is posted and the log isn't uploaded: the step fails, the
+      # next one posts a notice without the string, and the approval step finds no posted summary,
+      # so it dismisses an earlier approval. The texts are only ever grep's data, the matched string
+      # is never printed, and a grep error counts as a match. With no texts, such as after a failed
+      # engine step, it's clean, so the log still uploads.
+      - name: Scrub the review output
+        id: scrub
+        if: always()
+        env:
+          OUTGOING_DIR: ${{ runner.temp }}/review-outgoing
+        run: |
+          patterns=(
+            -e 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+            -e '(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}'
+            -e '(^|[^A-Za-z0-9_])(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}'
+            -e '(^|[^A-Za-z0-9_])github_pat_[A-Za-z0-9_]{20,}'
+          )
+          mkdir -p "$OUTGOING_DIR"
+          withheld=()
+          for text in "$OUTGOING_DIR"/*; do
+            [ -f "$text" ] || continue
+            LC_ALL=C grep -qE "${patterns[@]}" -- "$text" && code=0 || code=$?
+            [ "$code" -eq 1 ] || withheld+=("${text##*/}")
+          done
+          if [ "${#withheld[@]}" -eq 0 ]; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+            echo "No credential-shaped string in the review output."
+            exit 0
+          fi
+          echo "withheld=true" >> "$GITHUB_OUTPUT"
+          echo "::error title=Review output withheld::${withheld[*]} contained a credential-shaped string, so nothing from this review was posted."
+          exit 1
+
+      # One notice in place of everything withheld, with the run link and never the matched string
+      - name: Report withheld review output
+        if: always() && steps.scrub.outputs.withheld == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf 'Review output withheld: it contained a credential-shaped string, so nothing from this review was posted and its log wasn'"'"'t uploaded.\n\nRun: %s\n' "$RUN_URL" > "$RUNNER_TEMP/review-withheld.md"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/review-withheld.md"
+
+      # Posted by the workflow, so the comment can only go to this PR on github.com. That works on a
+      # merged PR as well as an open one.
+      - name: Post the review summary
+        id: summary
+        if: steps.compose.outcome == 'success' && steps.scrub.outputs.clean == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OUTGOING_DIR: ${{ runner.temp }}/review-outgoing
+        run: gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$OUTGOING_DIR/summary.md"
 
       # Opt-in (the approve input): a clean review also approves the head it reviewed, and a review
       # that isn't clean dismisses the bot's earlier approvals. The approval is only a signal and
@@ -1002,7 +1064,8 @@ jobs:
       #   4. the check summary the reviewer read has no FAIL or unavailable line;
       #   5. every review thread the bot started on the PR is resolved;
       #   6. the PR is open, not a draft, and its head is still the reviewed head.
-      # Runs after a failed or cancelled Claude step too, so an unfinished review withdraws an
+      # Runs after a failed or cancelled Claude step too, and after a scrub that withheld the
+      # review's output (no summary is posted then), so an unfinished review withdraws an
       # approval. A merged or closed PR is left alone, and nothing ever requests changes: findings
       # stay inline comments. A push doesn't start a review, so an approval stays on the PR after a
       # later push until the next review dismisses or replaces it.
@@ -1151,9 +1214,9 @@ jobs:
       # so a suspected reviewer miss can be investigated.
       # The name carries the reviewed head so a skill can find a round's log from the summary's
       # "Reviewed head:" line; comment-triggered runs are listed under the default branch, so a
-      # branch lookup wouldn't find them.
+      # branch lookup wouldn't find them. Not uploaded when the scrub withheld the review's output.
       - name: Upload the review log
-        if: always() && steps.claude.outputs.execution_file != ''
+        if: always() && steps.scrub.outputs.clean == 'true' && steps.claude.outputs.execution_file != ''
         uses: actions/upload-artifact@v7
         with:
           name: code-review-pr${{ env.PR_NUMBER }}-${{ steps.diff.outputs.head }}-attempt${{ github.run_attempt }}
@@ -1176,12 +1239,14 @@ jobs:
   # automatic review, and every requested one that finishes, skips this job:
   # an automatic review's red check carries Claude's error as an annotation.
   # The reply quotes that error when the review job read one, and otherwise
-  # names the usual causes
+  # names the usual causes. A review whose output the scrub withheld has
+  # already posted its notice, so it gets no second reply here.
   report-failure:
     needs: [request, review]
     if: >-
       always() && github.event_name == 'issue_comment' &&
-      needs.request.outputs.review == 'true' && needs.review.result != 'success'
+      needs.request.outputs.review == 'true' && needs.review.result != 'success' &&
+      needs.review.outputs.withheld != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
