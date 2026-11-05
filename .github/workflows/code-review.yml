@@ -1009,8 +1009,10 @@ jobs:
       # log, the check output and the diffs). A match there only stops the upload (log-clean isn't
       # set) and leaves the summary alone, so it warns instead of failing the step.
       # The texts and files are only ever grep's data, only file names are printed, never the
-      # matched string, and a grep error counts as a match. With no texts, such as after a failed
-      # engine step, it's clean, so the log still uploads.
+      # matched string, and a grep error counts as a match. Every entry in the outgoing directory,
+      # dotfiles included, is scanned, and one that isn't a regular file (a subdirectory, a symlink
+      # to one) is withheld unscanned, so nothing there is skipped. With no texts, such as after a
+      # failed engine step, it's clean, so the log still uploads.
       - name: Scrub the review output
         id: scrub
         if: always()
@@ -1052,18 +1054,26 @@ jobs:
           fi
           mkdir -p "$OUTGOING_DIR"
           withheld=()
+          # dotglob so dotfiles are scanned; an empty directory leaves the literal glob, which
+          # neither exists nor is a symlink, so it's skipped. A non-regular entry is withheld.
+          shopt -s dotglob
           for text in "$OUTGOING_DIR"/*; do
-            [ -f "$text" ] || continue
-            LC_ALL=C grep -qE "${patterns[@]}" -- "$text" && code=0 || code=$?
+            [ -e "$text" ] || [ -L "$text" ] || continue
+            if [ -f "$text" ]; then
+              LC_ALL=C grep -qE "${patterns[@]}" -- "$text" && code=0 || code=$?
+            else
+              code=2
+            fi
             [ "$code" -eq 1 ] || withheld+=("${text##*/}")
           done
+          shopt -u dotglob
           if [ "${#withheld[@]}" -eq 0 ]; then
             echo "clean=true" >> "$GITHUB_OUTPUT"
             echo "No credential-shaped string in the review output."
             exit 0
           fi
           echo "withheld=true" >> "$GITHUB_OUTPUT"
-          echo "::error title=Review summary withheld::${withheld[*]} contained a credential-shaped string, so the review summary was withheld and the review log wasn't uploaded."
+          echo "::error title=Review summary withheld::${withheld[*]} contained a credential-shaped string or couldn't be scanned, so the review summary was withheld and the review log wasn't uploaded."
           exit 1
 
       # One notice in place of the withheld summary, with the run link and never the matched string.
