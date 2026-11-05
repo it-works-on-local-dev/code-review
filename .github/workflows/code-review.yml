@@ -14,7 +14,7 @@
 #       name: Claude
 #       permissions:
 #         contents: read
-#       uses: it-works-on-local-dev/code-review/.github/workflows/claude-code-review.yml@v1
+#       uses: it-works-on-local-dev/code-review/.github/workflows/code-review.yml@v2
 #       secrets:
 #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 #         # and/or ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}; with both, a /review line
@@ -27,7 +27,7 @@
 #           run_step check <name> <command>
 #
 # A called workflow sees its caller's github context, so the events below are the stub's own.
-name: Claude Code Review (reusable)
+name: Code Review (reusable)
 
 on:
   workflow_call:

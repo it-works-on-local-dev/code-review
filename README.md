@@ -1,6 +1,6 @@
 # code-review
 
-A reusable GitHub Actions workflow, [`.github/workflows/claude-code-review.yml`](.github/workflows/claude-code-review.yml), that has Claude review your repository's pull requests. It runs your repository's own checks, reads the diff, posts each finding as an inline comment and a summary comment, and does it all as your own GitHub App. You call it from a short workflow file, a stub, in your repository.
+A reusable GitHub Actions workflow, [`.github/workflows/code-review.yml`](.github/workflows/code-review.yml), that has Claude review your repository's pull requests. It runs your repository's own checks, reads the diff, posts each finding as an inline comment and a summary comment, and does it all as your own GitHub App. You call it from a short workflow file, a stub, in your repository.
 
 - [What the workflow does](#what-the-workflow-does)
 - [How it keeps secrets away from PR code](#how-it-keeps-secrets-away-from-pr-code)
@@ -117,7 +117,7 @@ jobs:
     # The workflow posts through the review app's own token
     permissions:
       contents: read
-    uses: it-works-on-local-dev/code-review/.github/workflows/claude-code-review.yml@v1
+    uses: it-works-on-local-dev/code-review/.github/workflows/code-review.yml@v2
     # Only the secrets the workflow declares, never secrets: inherit
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -166,7 +166,7 @@ jobs:
     needs: runner
     permissions:
       contents: read
-    uses: it-works-on-local-dev/code-review/.github/workflows/claude-code-review.yml@v1
+    uses: it-works-on-local-dev/code-review/.github/workflows/code-review.yml@v2
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}

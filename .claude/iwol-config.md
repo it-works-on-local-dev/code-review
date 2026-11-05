@@ -25,7 +25,7 @@ Always untracked here. Never stage them: none.
 
 ## Review
 
-- **Reviewer:** the Code Review workflow (`.github/workflows/review.yml`, calling this repo's reusable `claude-code-review.yml`), posting as `iwol-reviewer[bot]` (GraphQL login `iwol-reviewer`).
+- **Reviewer:** the Code Review workflow (`.github/workflows/review.yml`, calling this repo's reusable `code-review.yml`), posting as `iwol-reviewer[bot]` (GraphQL login `iwol-reviewer`).
 - **When it reviews:** by itself when a PR opens ready or is marked ready (not drafts, fork PRs or PRs opened by bots); after that only on request, so every later push needs a request.
 - **Requesting a review:** comment a line starting `/review` on the PR, optionally `/review [model] [effort] [oauth|api-key]` in any order (default `opus`, an alias for the newest Opus model the workflow's Claude Code knows, at `xhigh`, on the Claude Code OAuth token). A request that doesn't parse gets a bot reply starting "Claude review request failed:" and doesn't count. `oauth` runs the review on `CLAUDE_CODE_OAUTH_TOKEN` and `api-key` on `ANTHROPIC_API_KEY`, and `review.yml` passes both: a comment naming one it doesn't pass fails the same way, while in the PR description that credential is ignored and the default used.
 - **In progress:** a running `Claude / review` check for an automatic review (GitHub's UI shows it as `Code Review / Claude / review`; match on `Claude / review`), or a 👀 on the request comment for a requested one. The 👀 stays, so only a later summary or failure reply ends a round; only bot comments newer than the request count. An automatic review also leaves a 👀 on the PR description, which stays from the first review on, so it never marks a review in progress.
