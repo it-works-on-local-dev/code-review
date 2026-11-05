@@ -1,4 +1,4 @@
-# Claude reviews this repository's pull requests through the shared workflow beside this file,
+# This repository's pull requests are reviewed through the shared workflow beside this file,
 # called by its local path: a PR that changes the workflow is reviewed by its own version when it
 # opens, while a /review comment runs main's. Other repositories call it at the @v1 ref from a stub
 # of the same shape, which /iwol:setup writes.
@@ -8,14 +8,15 @@ on:
   pull_request:
     types: [opened, ready_for_review]
     branches: [main]
-  # A comment line starting "/review [model] [effort] [oauth|api-key]" asks for a fresh review
+  # A comment line starting "/review [claude|codex] [model] [effort] [sub|api]" asks for a fresh review
   issue_comment:
     types: [created]
 
 jobs:
   review:
-    # GitHub shows the called workflow's checks as "Code Review / Claude / <job>"
-    name: Claude
+    # GitHub shows the called workflow's checks as "Code Review / Reviewer / <job>", the review job
+    # named after its engine, as in "Code Review / Reviewer / Claude"
+    name: Reviewer
     # The workflow posts through the review app's own token
     permissions:
       contents: read
@@ -23,13 +24,16 @@ jobs:
     # Only the secrets the workflow declares, not every repository and organisation secret
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      # Empty until the secret is set; then /review api-key runs a review on it
+      # Empty until the secret is set; then /review api runs a Claude review on it
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Empty until the secret is set; a /review codex request needs it. CODEX_AUTH_JSON isn't
+      # passed: this repository is public, and OpenAI allows the stored login only in private ones
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
     with:
       review-app-client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
-      # A review runs on the OAuth token unless its /review line says api-key
-      default-credential: oauth
+      # A Claude review runs on the OAuth token unless its /review line says api
+      default-claude-credential: sub
       # A mention of @iwol-reviewer starts the request job, and a thank-you to it gets a 🎉
       review-app-slug: iwol-reviewer
       # A clean review also approves the PR's reviewed head, and one that isn't clean dismisses
