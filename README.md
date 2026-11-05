@@ -1,6 +1,6 @@
 # code-review
 
-A reusable GitHub Actions workflow, [`.github/workflows/code-review.yml`](.github/workflows/code-review.yml), that has Claude or OpenAI Codex review your repository's pull requests. It runs your repository's own checks, reads the diff, posts each finding as an inline comment and a summary comment, and does it all as your own GitHub App. You call it from a short workflow file, a stub, in your repository.
+A reusable GitHub Actions workflow, [`.github/workflows/code-review.yml`](.github/workflows/code-review.yml), that has Claude review your repository's pull requests. OpenAI Codex is named in the request contract as a second engine, but it isn't available yet and arrives in a later release. It runs your repository's own checks, reads the diff, posts each finding as an inline comment and a summary comment, and does it all as your own GitHub App. You call it from a short workflow file, a stub, in your repository.
 
 - [What the workflow does](#what-the-workflow-does)
 - [How it keeps secrets away from PR code](#how-it-keeps-secrets-away-from-pr-code)
@@ -24,7 +24,7 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 **When it reviews.**
 
 - **By itself.** When a pull request opens, or each time it's marked ready for review, it reviews the PR if the PR is not a draft, its branch is in the same repository, and it was not opened by a bot. Such a review replaces a review still running for the PR.
-- **On request.** It reviews when someone with write or admin access on the repository comments on the PR with a line starting `/review`. A request reaches any PR whose branch is in the repository, including the ones the automatic review skips: drafts, PRs opened by Dependabot or another bot, PRs into a branch other than the one your stub names, and closed or merged PRs. It's the usual way to get a Dependabot PR reviewed. The workflow accepts a comment from the repository's owner, a member of the organisation that owns it, or a collaborator on it (a comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`), then checks the commenter's repository permission itself. An owner, member or collaborator without write or admin access gets a reply starting `Review request failed:` from the workflow's first job, and nothing else runs. A `/review` from anyone else is ignored, with no reply. The line is `/review [claude|codex] [model] [effort] [sub|api]`: an engine, a model, an effort and a credential, each optional and in any order. `/review`, `/review sonnet`, `/review high`, `/review opus max`, `/review max opus`, `/review codex`, `/review gpt-6.1-sol ultra` and `/review api opus` all work. If it cannot parse the request it replies with a comment starting `Review request failed:` and does not review.
+- **On request.** It reviews when someone with write or admin access on the repository comments on the PR with a line starting `/review`. A request reaches any PR whose branch is in the repository, including the ones the automatic review skips: drafts, PRs opened by Dependabot or another bot, PRs into a branch other than the one your stub names, and closed or merged PRs. It's the usual way to get a Dependabot PR reviewed. The workflow accepts a comment from the repository's owner, a member of the organisation that owns it, or a collaborator on it (a comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`), then checks the commenter's repository permission itself. An owner, member or collaborator without write or admin access gets a reply starting `Review request failed:` from the workflow's first job, and nothing else runs. A `/review` from anyone else is ignored, with no reply. The line is `/review [claude|codex] [model] [effort] [sub|api]`: an engine, a model, an effort and a credential, each optional and in any order. `/review`, `/review sonnet`, `/review high`, `/review opus max`, `/review max opus`, and `/review api opus` all work. The Codex forms, `/review codex` and `/review gpt-6.1-sol ultra`, parse but currently fail: the Codex engine isn't available yet and arrives in a later release, so a Codex request gets a reply starting `Review request failed:` and no review. If it cannot parse the request it replies with a comment starting `Review request failed:` and does not review.
 - **Not with a mention.** Only a `/review` line requests a review. If you set `review-app-slug`, a comment that mentions `@<slug>` from any owner, organisation member or collaborator, with or without write access, also reaches the workflow, so a thank-you to the bot gets a 🎉 reaction. A comment with a `/review` line is reviewed whether or not it also mentions or thanks the bot, so a thank-you with a `/review` line gets both. Without `review-app-slug`, nothing gets the 🎉.
 - **Never for forks.** A pull request whose branch lives in a fork is never reviewed, automatically or on request.
 
@@ -53,9 +53,9 @@ The workflow is triggered only by `workflow_call`, so it does nothing until a st
 
    A review with no findings has the heading `### No issues found! 🚀` instead. A Codex review's footer reads `Reviewed by Codex with ...`.
 
-**When a review fails.** An automatic review that fails leaves a red `Code Review / Reviewer / Claude` or `Code Review / Reviewer / Codex` check, with no comment, so a successful re-run leaves nothing stale behind. A requested review that fails, times out or is cancelled gets a reply starting `Review didn't finish`. When the engine's own run ended in an error, such as `Credit balance is too low` or a usage limit, which a retry won't fix, the run shows that error as a `Claude review failed` annotation and in its summary, and the reply quotes it: `<Claude or Codex> stopped with an error: <error>`. The error is cut to one line of at most 200 characters, with any long token-like word redacted. Without one, the reply says the review may have hit the 60-minute limit or been replaced by a newer one.
+**When a review fails.** An automatic review that fails leaves a red `Code Review / Reviewer / Claude` or `Code Review / Reviewer / Codex` check, with no comment, so a successful re-run leaves nothing stale behind. A requested review that fails, times out or is cancelled gets a reply starting `Review didn't finish`. When the engine's own run ended in an error, such as `Credit balance is too low` or a usage limit, which a retry won't fix, the run shows that error as a `Claude review failed` annotation and in its summary, and the reply quotes it: `<Claude or Codex> stopped with an error: <error>`. The error is cut to one line of at most 200 characters, with any long token-like word redacted. Without one, the reply says the review may have hit the 60-minute limit or been replaced by a newer one. When the review summary contains a credential-shaped string, the summary is withheld, the review log isn't uploaded, and the workflow posts one notice starting `Review output withheld:` with a link to the run; a requested review gets that instead of `Review didn't finish`. Claude's own inline comments are still posted.
 
-**The review log.** Each review run uploads its review log as an artifact named `code-review-pr<PR>-<sha>-attempt<n>`: the PR number, the reviewed head (the sha on the summary's `Reviewed head:` line) and the run attempt. The artifact holds the execution log (every tool call, then a result block listing the permission denials and the total cost), the check output, and the diffs and PR conversation the reviewer read, so a suspected reviewer miss can be investigated. It is kept for 14 days.
+**The review log.** Each review run uploads its review log, unless the summary is withheld or a credential-shaped string turns up in the log itself (the summary still posts in that case if it is clean), as an artifact named `code-review-pr<PR>-<sha>-attempt<n>`: the PR number, the reviewed head (the sha on the summary's `Reviewed head:` line) and the run attempt. The artifact holds the execution log (every tool call, then a result block listing the permission denials and the total cost), the check output, and the diffs and PR conversation the reviewer read, so a suspected reviewer miss can be investigated. It is kept for 14 days.
 
 **Engine, model, effort and credential.** A request may name any of the four, in any order, each optional.
 
@@ -68,7 +68,7 @@ Anything a request leaves out uses the engine's own defaults: `default-claude-mo
 
 The `default-reviewer` must have a credential in your stub, or the run fails early. A request that names an engine whose credential your stub doesn't pass gets a reply naming that engine's two secrets, and a request naming a credential your stub doesn't pass is refused the same way. The review is handed only the credential it runs on, so the other is never used, not even by the action's inline-comment classifier, which calls the API with the key whenever it has one.
 
-For the automatic review, the request is the PR description's last line starting `/review`, read the same way as a comment's (`/review haiku low`, `/review codex max`). A comment's failed request gets a `Review request failed:` reply; the description's line is lenient: a line the workflow can't parse is ignored, with only a warning in the run log, and the review uses the defaults.
+For the automatic review, the request is the PR description's last line starting `/review`, read the same way as a comment's (`/review haiku low`, `/review codex max`, which fails until Codex is available). A comment's failed request gets a `Review request failed:` reply; the description's line is lenient: a line the workflow can't parse is ignored, with only a warning in the run log, and the review uses the defaults.
 
 ## How it keeps secrets away from PR code
 
@@ -104,7 +104,7 @@ You need a GitHub App for the review to post as, a stub workflow that calls this
    gh secret set ANTHROPIC_API_KEY
    ```
 
-   For Codex, set `OPENAI_API_KEY` and/or `CODEX_AUTH_JSON` the same way.
+   The Codex engine isn't available yet, so its secrets, `OPENAI_API_KEY` and `CODEX_AUTH_JSON`, have no use today; when it arrives you set them the same way.
 
 If you want a thank-you to the app to get a 🎉, pass the app's slug as `review-app-slug`. Reviews are requested with `/review` either way.
 
@@ -215,11 +215,11 @@ The `iwol` Claude Code plugin, from [it-works-on-local-dev/skills](https://githu
 | `review-app-client-id` | yes | | The review app's client ID, normally the `REVIEW_APP_CLIENT_ID` repository variable. |
 | `review-app-slug` | no | empty | The app's login without `[bot]`. With it set, a comment mentioning `@<slug>` also reaches the workflow, so a thank-you to the bot gets a 🎉. Only a `/review` line starts a review, with or without it. |
 | `runs-on` | no | `"ubuntu-latest"` | A JSON label string or JSON array of labels for the machine the checks and review jobs run on. In YAML, quote the JSON: `runs-on: '"ubuntu-24.04"'` or `runs-on: '["self-hosted", "linux"]'`. An expression whose output is already JSON, such as the self-hosted example's `${{ needs.runner.outputs.linux }}`, is passed as it is. |
-| `default-reviewer` | no | `claude` | The engine, `claude` or `codex`, used when a request names neither an engine nor a model. Its credentials must be passed in your stub, or every run fails before the checks start. |
+| `default-reviewer` | no | `claude` | The engine, `claude` or `codex`, used when a request names neither an engine nor a model. The Codex engine isn't available yet, so `codex` currently makes every review fail. Its credentials must be passed in your stub, or every run fails before the checks start. |
 | `default-claude-model` | no | `opus` | The model a Claude review uses when its request names none: an alias or a full model ID. |
 | `default-claude-effort` | no | `xhigh` | The effort a Claude review uses when its request names none: `low`, `medium`, `high`, `xhigh` or `max`. |
 | `default-claude-credential` | no | `auto` | The credential a Claude review uses when its request names none: `sub` (`CLAUDE_CODE_OAUTH_TOKEN`), `api` (`ANTHROPIC_API_KEY`), or `auto`, which takes whichever of the two your stub passes, and the API key when it passes both. |
-| `default-codex-model` | no | `gpt-6.1-sol` | The model a Codex review uses when its request names none: a `gpt-` model. |
+| `default-codex-model` | no | `gpt-6.1-sol` | The model a Codex review will use when its request names none: a `gpt-` model. Codex isn't available yet, so nothing reads it today. |
 | `default-codex-effort` | no | `xhigh` | The effort a Codex review uses when its request names none: `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. |
 | `default-codex-credential` | no | `auto` | The credential a Codex review uses when its request names none: `sub` (`CODEX_AUTH_JSON`), `api` (`OPENAI_API_KEY`), or `auto`, which takes whichever of the two your stub passes, and the API key when it passes both. |
 | `approve` | no | `false` | Approve the reviewed head when a review is clean, and dismiss the bot's earlier approvals when one is not. See [Approving clean reviews](#approving-clean-reviews). |
@@ -232,7 +232,7 @@ Pass each secret by name in the stub's `secrets:` block.
 | --- | --- | --- |
 | `CLAUDE_CODE_OAUTH_TOKEN` | one of the engine's two | A Claude Code OAuth token, for example from `claude setup-token`: the Claude engine's `sub` credential. |
 | `ANTHROPIC_API_KEY` | one of the engine's two | An Anthropic API key: the Claude engine's `api` credential. |
-| `OPENAI_API_KEY` | one of the engine's two | One of the Codex engine's two credentials, its `api` credential. |
+| `OPENAI_API_KEY` | one of the engine's two | One of the Codex engine's two credentials, its `api` credential. Not used until Codex is available. |
 | `CODEX_AUTH_JSON` | one of the engine's two | One of the Codex engine's two credentials, its `sub` credential. For private repositories only. |
 | `REVIEW_APP_PRIVATE_KEY` | yes | The review app's private key. |
 
@@ -254,7 +254,7 @@ With `approve: true`, a clean review also submits a GitHub approval on the head 
 
 Releases are tagged `vX.Y.Z` by [release-please](https://github.com/googleapis/release-please) from conventional-commit PR titles, and each release's changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-- **`@v1` is frozen at 1.1.0.** The workflow was `claude-code-review.yml` there, with Claude as its only engine. Public `@v1` stubs keep working, without Codex.
+- **`@v1` is frozen at 1.2.1, the last 1.x release.** The workflow was `claude-code-review.yml` there, with Claude as its only engine. Public `@v1` stubs keep working, without Codex.
 - **`@v2` moves.** From 2.0.0, the `v2` tag moves to each compatible release, so a stub at `@v2` receives fixes and features without changing.
 - **Breaking changes get a new major tag.** Moving from `v1` to `v2` is a change to your stub, as is any later major. Migrating from `@v1` to `@v2` means:
   - the new path, `.github/workflows/code-review.yml@v2`, in place of `claude-code-review.yml@v1`;
