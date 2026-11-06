@@ -922,6 +922,12 @@ jobs:
       # secret itself only ever reaches jq and the file. Codex may refresh the login inside that
       # directory, but nothing writes it back to the secret: once the stored login expires, the
       # review fails and its reply says to log in again.
+      # A refreshed login's tokens aren't masked, so no command Codex runs may read the directory:
+      # its config.toml defines read-only-without-login, the permission profile the engine step
+      # selects, which is :read-only with this directory denied. Codex's sandbox then mounts an
+      # empty, unreadable directory over it for every command, so a PR that steers Codex into
+      # printing auth.json gets nothing, while the Codex process itself, outside the sandbox, still
+      # reads and refreshes the login. The file names no trusted project and holds nothing else.
       - name: Prepare the Codex login
         id: codex-login
         if: needs.request.outputs.reviewer == 'codex' && needs.request.outputs.credential == 'sub'
@@ -947,6 +953,15 @@ jobs:
           # Readable by the runner's user only, which Codex runs as
           umask 077
           mkdir -p "$CODEX_HOME"
+          # The directory's path as a quoted TOML key: jq's JSON string escapes are valid TOML
+          home_key=$(jq -n 'env.CODEX_HOME')
+          {
+            echo '[permissions.read-only-without-login]'
+            echo 'extends = ":read-only"'
+            echo
+            echo '[permissions.read-only-without-login.filesystem]'
+            printf '%s = "deny"\n' "$home_key"
+          } > "$CODEX_HOME/config.toml"
           printf '%s' "$CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"
           # The action reads its API proxy's server-info file whenever it has a prompt, even when
           # it starts no proxy (openai/codex-action#70), and fails without one. With no API key
@@ -964,8 +979,12 @@ jobs:
       # action's local proxy holds, so the Codex process never sees it; for sub the Codex home from
       # the step above, with the API key empty. No Claude secret ever reaches this step.
       # drop-sudo, the action's default, takes sudo away for the rest of the job before Codex starts,
-      # so nothing after this step may need it. The :read-only permission profile lets Codex's
-      # commands read files but not write them or reach the network.
+      # so nothing after this step may need it. Codex's commands may read files but not write them
+      # or reach the network: for api under the built-in :read-only permission profile, and for sub
+      # under read-only-without-login, which the Codex home's config.toml defines as :read-only
+      # with that home denied, so no command can read the stored login or a refreshed one. A
+      # profile name without a leading ':' is looked up in that file, and Codex won't start if it
+      # isn't there.
       # Codex loads no instructions from the checkout: a project-document limit of 0 bytes keeps the
       # PR's AGENTS.md and AGENTS.override.md out, and with the skills catalog left out of its
       # context, a skill the PR adds under .agents/skills or .codex/skills isn't listed for it. The
@@ -985,7 +1004,7 @@ jobs:
           model: ${{ needs.request.outputs.model }}
           effort: ${{ needs.request.outputs.effort }}
           safety-strategy: drop-sudo
-          permission-profile: ':read-only'
+          permission-profile: ${{ needs.request.outputs.credential == 'sub' && 'read-only-without-login' || ':read-only' }}
           codex-args: '["--config", "project_doc_max_bytes=0", "--config", "skills.include_instructions=false"]'
           output-file: ${{ runner.temp }}/codex-final-message.json
           output-schema: '{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"summary":{"type":"string"},"comment":{"type":"string"}},"required":["path","line","summary","comment"],"additionalProperties":false}},"note":{"type":"string"},"complete":{"type":"boolean"}},"required":["findings","note","complete"],"additionalProperties":false}'
