@@ -681,8 +681,9 @@ jobs:
     permissions:
       contents: read
     outputs:
-      # Claude's own error when its run failed, for report-failure's reply; empty when there's none
-      error: ${{ steps.claude-error.outputs.error }}
+      # The engine's error when its run failed, for report-failure's reply: Claude's own, or for
+      # Codex a fixed line pointing to the run log; empty when there's none
+      error: ${{ steps.claude-error.outputs.error || steps.codex-error.outputs.error }}
       # true when the scrub withheld the review summary and the notice saying so was posted
       withheld-notice: ${{ steps.withheld-notice.outputs.posted }}
       # true when the scrub withheld the review summary, for report-failure's reply when the notice wasn't posted
@@ -1100,6 +1101,19 @@ jobs:
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # When the Codex step fails, such as on a bad or exhausted API key, a model that doesn't
+      # exist, a usage limit or an expired stored login, report-failure's reply should say Codex
+      # stopped with an error rather than name the 60-minute limit. The pinned action gives nothing
+      # safe to quote: it sets final-message only when Codex exits cleanly, has no error output, and
+      # sends Codex's own error straight to the run log. So the job's error output gets a fixed
+      # line pointing there, never text from Codex. Anything else (a timeout, a cancelled run)
+      # leaves it empty.
+      - name: Note Codex's failure
+        id: codex-error
+        if: failure() && steps.codex.outcome == 'failure'
+        run: |
+          echo "error=Codex's run failed; its error is in the run log" >> "$GITHUB_OUTPUT"
+
       # The workflow assembles the summary comment, so its shape doesn't depend on the reviewer: a
       # heading counting the findings, one "- " line per finding, a "Partial review:" line unless the
       # reviewer says it covered every changed file, the reviewer's note, the check lines and the
@@ -1462,12 +1476,13 @@ jobs:
   # leave only the 👀 behind, since comment-triggered runs show no check. Every
   # automatic review, and every requested one that finishes, skips this job:
   # an automatic review's red check carries Claude's error as an annotation.
-  # The reply quotes that error when the review job read one, and otherwise
-  # names the usual causes. A review whose summary the scrub withheld gets no
-  # second reply here once its notice is posted; if posting the notice failed,
-  # this job replies instead. A Codex review on the stored login (sub) may have
-  # failed because that login expired, which nothing renews, so its reply also
-  # says how to replace it.
+  # The reply quotes that error when the review job read one, says a failed
+  # Codex step's error is in the run log, and otherwise names the usual
+  # causes. A review whose summary the scrub withheld gets no second reply
+  # here once its notice is posted; if posting the notice failed, this job
+  # replies instead. A Codex review on the stored login (sub) may have failed
+  # because that login expired, which nothing renews, so its reply also says
+  # how to replace it.
   report-failure:
     needs: [request, review]
     if: >-
@@ -1493,6 +1508,7 @@ jobs:
           # sub or api, the engine's own credential the review ran on
           CREDENTIAL: ${{ needs.request.outputs.credential }}
           # Already one short line with no backticks, from the review job's "Read Claude's error"
+          # or "Note Codex's failure"
           ERROR: ${{ needs.review.outputs.error }}
           # true when the scrub withheld the summary but its notice wasn't posted
           WITHHELD: ${{ needs.review.outputs.withheld }}
