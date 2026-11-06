@@ -86,17 +86,39 @@ jobs:
 
       # Idempotent: one branch and one PR per target version, so a second run for the same version
       # finds the open PR and stops.
+      #
+      # Only the app's own same-repository PR on the exact head counts: --head matches the branch
+      # name alone, so a fork's PR from a branch of the same name is filtered out by
+      # isCrossRepository, and a person's PR is filtered out by the author.
+      #
+      # The lookup ignores the base. The branch name carries only the version, so a run on another
+      # branch would push to the same branch name and force-push over the head of an open PR that
+      # targets a different base. When the PR is open on this run's base there is nothing to do;
+      # when it is open on another base the run stops without pushing and says so.
       - name: Look for an open PR for this target version
         id: existing
         if: steps.pin.outputs.bump == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           LATEST: ${{ steps.pin.outputs.latest }}
         run: |
           set -euo pipefail
-          open="$(gh pr list --state open --base "${GITHUB_REF_NAME}" --head "bump-codex/${LATEST}" --json number --jq 'length')"
-          if [ "${open}" -gt 0 ]; then
-            echo "A PR for ${LATEST} is already open; opening no second one."
+          branch="bump-codex/${LATEST}"
+          prs="$(gh pr list --state open --author "app/${APP_SLUG}" --head "${branch}" --limit 100 --json number,baseRefName,headRefName,isCrossRepository)"
+
+          same_base="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" \
+            '[.[] | select(.isCrossRepository == false and .headRefName == $head and .baseRefName == $base)] | .[0].number // empty' <<< "${prs}")"
+          if [ -n "${same_base}" ]; then
+            echo "A PR for ${LATEST} is already open (#${same_base}); opening no second one."
+            echo "open=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          other_base="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" \
+            '[.[] | select(.isCrossRepository == false and .headRefName == $head and .baseRefName != $base)] | .[0] // empty | "#\(.number) targeting \(.baseRefName)"' <<< "${prs}")"
+          if [ -n "${other_base}" ]; then
+            echo "::notice::A bump PR for ${LATEST} is already open (${other_base}), not on this run's base ${GITHUB_REF_NAME}. Pushing ${branch} would rewrite that PR's head, so this run pushes nothing."
             echo "open=true" >> "${GITHUB_OUTPUT}"
           else
             echo "open=false" >> "${GITHUB_OUTPUT}"
@@ -151,7 +173,11 @@ jobs:
           set -euo pipefail
           file=.github/workflows/code-review.yml
           branch="bump-codex/${LATEST}"
-          title="chore(deps): bump @openai/codex from ${CURRENT} to ${LATEST}"
+          # fix(deps), not chore(deps): release-please releases nothing for chore, so callers on the
+          # v2 tag would never get the new CLI. fix cuts a patch release when this merges, as the
+          # fix(deps) titles in dependabot.yml do. The title has no @openai/codex either, since an
+          # @word in a changelog entry becomes a profile link.
+          title="fix(deps): bump the Codex CLI from ${CURRENT} to ${LATEST}"
 
           # The one pin line; versions are validated x.y.z, so only the dots need escaping
           current_re="${CURRENT//./\\.}"
@@ -190,9 +216,11 @@ jobs:
           # An open bump PR for an older target version is superseded by this one: it would only
           # edit the same line to a version that is no longer the latest. Close it with a pointer
           # and delete its branch. This runs after the new PR exists, so a failure above never
-          # leaves the repository without an open bump PR.
-          gh pr list --state open --base "${GITHUB_REF_NAME}" --limit 100 --json number,headRefName \
-            --jq ".[] | select((.headRefName | startswith(\"bump-codex/\")) and .headRefName != \"${branch}\") | .number" \
+          # leaves the repository without an open bump PR. Only the app's own same-repository PRs
+          # on a bump-codex/<version> branch are touched, never a person's or a fork's.
+          gh pr list --state open --base "${GITHUB_REF_NAME}" --author "app/${APP_SLUG}" --limit 100 --json number,headRefName,isCrossRepository \
+            | jq -r --arg branch "${branch}" \
+              '.[] | select(.isCrossRepository == false and (.headRefName | test("^bump-codex/[0-9]+\\.[0-9]+\\.[0-9]+$")) and .headRefName != $branch) | .number' \
             | while read -r old; do
               gh pr close "${old}" --delete-branch --comment "Superseded by #${number}, which bumps to ${LATEST}."
             done
