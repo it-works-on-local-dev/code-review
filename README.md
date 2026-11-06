@@ -234,7 +234,7 @@ The `v2` tag exists once 2.0.0 is released, so a stub at `@v2` can't run before 
 
 ### Self-hosted example
 
-The stub above runs on GitHub-hosted `ubuntu-latest`. To run the checks and review jobs on self-hosted runners, add a job to your stub that works out which runner to use and pass its result as `runs-on`. This is how this repository's own organisation does it, with a runner picker in its `it-works-on-local-dev/runners` repository that chooses between its self-hosted runners and GitHub-hosted ones.
+The stub above runs the checks and review jobs on GitHub-hosted `ubuntu-latest`. To run them on self-hosted runners, add a job to your stub that works out which runner to use and pass its result as `runs-on`. This is how this repository's own organisation does it, with a runner picker in its `it-works-on-local-dev/runners` repository that chooses between its self-hosted runners and GitHub-hosted ones.
 
 Self-hosted runners must give each job a freshly provisioned VM or container that is thrown away after the job and cannot reach its host or the machines other jobs run on. That means no mounted host Docker socket, no privileged mode, and no host namespaces or mounts, which rules out Actions Runner Controller runner pods in dind mode; otherwise, use a new VM for each job, for example from an autoscaler that creates a new VM for each just-in-time runner. Registering runners with `--ephemeral` or just-in-time on reused hardware is not enough. The checks job runs the PR's code, and the review job, sent to the same runners, holds the Claude credential and the app token, so on a reused machine, or from a container that can reach its host, code started by the checks job could outlive it and reach the review job's tokens.
 
