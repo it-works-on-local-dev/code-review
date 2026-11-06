@@ -25,12 +25,23 @@ jobs:
     steps:
       # The release-manager app's token, not GITHUB_TOKEN: a PR made with GITHUB_TOKEN triggers no
       # other workflow, so the bump PR would get no CI run.
+      #
+      # The bump edits code-review.yml, which is itself a workflow file, and GitHub refuses a push
+      # that creates or updates a workflow file unless the token has the workflows permission. So
+      # the release-manager app must be granted the "Workflows: Read and write" repository
+      # permission in its settings, and the token asks for it below. Setting any permission-*
+      # input scopes the token to exactly those, so every permission the job uses is listed:
+      # contents (push the bump branch, delete a superseded one), pull-requests (list, open and
+      # close bump PRs), and workflows (push the edited workflow file).
       - name: Generate release-manager app token
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
 
       # The run's own ref, which is main for the schedule and whichever branch a dispatch picks.
       # The PR goes back to that ref, so its diff is the one line.

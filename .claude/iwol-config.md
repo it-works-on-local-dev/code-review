@@ -41,7 +41,7 @@ Always untracked here. Never stage them: none.
 - **Workflow:** `ci.yml`, gating job `check`.
 - **Runs on:** hosted. CI uses GitHub-hosted runners only, so a queued job is only waiting for GitHub.
 - **Recovering a stuck run:** none documented.
-- **Codex CLI bump:** `bump-codex.yml`, weekly (Mondays) and on dispatch. It opens a `chore(deps): bump @openai/codex from X to Y` PR editing only the `codex-version` line of `code-review.yml`, through the release-manager app's token so CI runs on it, and adds a PR-body line when Codex's model catalogue puts a model other than `default-codex-model` first. A newer target version closes an open bump PR for an older one. Treat it as a normal PR: it has no review-rule exceptions.
+- **Codex CLI bump:** `bump-codex.yml`, weekly (Mondays) and on dispatch. It opens a `chore(deps): bump @openai/codex from X to Y` PR editing only the `codex-version` line of `code-review.yml`, through the release-manager app's token so CI runs on it (the bump edits a workflow file, so the app must be granted the "Workflows: Read and write" repository permission), and adds a PR-body line when Codex's model catalogue puts a model other than `default-codex-model` first. A newer target version closes an open bump PR for an older one. Treat it as a normal PR: it has no review-rule exceptions.
 - **Waiting for CI:** after a push, a PR skill waits for the run on the pushed commit with this loop, run in the background. It prints `<run id> completed <conclusion>` when the run finishes, or each job's status after 20 minutes; a `null null null` there means no run started for the commit.
 
 ```bash
