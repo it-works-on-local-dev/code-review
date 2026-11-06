@@ -6,6 +6,9 @@ on:
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:
+  # TEST ONLY (code-review-78p.5): runs this workflow before it's on main. Never merge.
+  push:
+    branches: [test/bump-codex-78p5]
 
 permissions:
   contents: read
