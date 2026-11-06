@@ -87,14 +87,17 @@ jobs:
       # Idempotent: one branch and one PR per target version, so a second run for the same version
       # finds the open PR and stops.
       #
-      # Only the app's own same-repository PR on the exact head counts: --head matches the branch
-      # name alone, so a fork's PR from a branch of the same name is filtered out by
-      # isCrossRepository, and a person's PR is filtered out by the author.
+      # Every open same-repository PR on the exact head counts, whoever opened it: --head matches
+      # the branch name alone, so a fork's PR from a branch of the same name is filtered out by
+      # isCrossRepository, but a person's PR on this branch is not. Pushing would rewrite that PR's
+      # head and lose its commits, and gh pr create would then fail because a PR for that head and
+      # base already exists.
       #
       # The lookup ignores the base. The branch name carries only the version, so a run on another
       # branch would push to the same branch name and force-push over the head of an open PR that
-      # targets a different base. When the PR is open on this run's base there is nothing to do;
-      # when it is open on another base the run stops without pushing and says so.
+      # targets a different base. Only the app's own PR on this run's base is the expected case and
+      # stops the run quietly. Any other open PR on the head, a person's PR on any base or the
+      # app's own PR on another base, stops the run with a notice naming it, and nothing is pushed.
       - name: Look for an open PR for this target version
         id: existing
         if: steps.pin.outputs.bump == 'true'
@@ -105,20 +108,20 @@ jobs:
         run: |
           set -euo pipefail
           branch="bump-codex/${LATEST}"
-          prs="$(gh pr list --state open --author "app/${APP_SLUG}" --head "${branch}" --limit 100 --json number,baseRefName,headRefName,isCrossRepository)"
+          prs="$(gh pr list --state open --head "${branch}" --limit 100 --json number,author,baseRefName,headRefName,isCrossRepository)"
 
-          same_base="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" \
-            '[.[] | select(.isCrossRepository == false and .headRefName == $head and .baseRefName == $base)] | .[0].number // empty' <<< "${prs}")"
+          same_base="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" --arg app "app/${APP_SLUG}" \
+            '[.[] | select(.isCrossRepository == false and .headRefName == $head and .baseRefName == $base and .author.login == $app)] | .[0].number // empty' <<< "${prs}")"
           if [ -n "${same_base}" ]; then
             echo "A PR for ${LATEST} is already open (#${same_base}); opening no second one."
             echo "open=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          other_base="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" \
-            '[.[] | select(.isCrossRepository == false and .headRefName == $head and .baseRefName != $base)] | .[0] // empty | "#\(.number) targeting \(.baseRefName)"' <<< "${prs}")"
-          if [ -n "${other_base}" ]; then
-            echo "::notice::A bump PR for ${LATEST} is already open (${other_base}), not on this run's base ${GITHUB_REF_NAME}. Pushing ${branch} would rewrite that PR's head, so this run pushes nothing."
+          other="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" --arg app "app/${APP_SLUG}" \
+            '[.[] | select(.isCrossRepository == false and .headRefName == $head and (.author.login != $app or .baseRefName != $base))] | .[0] // empty | "#\(.number) by \(.author.login // "an unknown author") targeting \(.baseRefName)"' <<< "${prs}")"
+          if [ -n "${other}" ]; then
+            echo "::notice::A PR on ${branch} is already open (${other}), and it isn't the app's own PR on this run's base ${GITHUB_REF_NAME}. Pushing ${branch} would rewrite that PR's head, so this run pushes nothing."
             echo "open=true" >> "${GITHUB_OUTPUT}"
           else
             echo "open=false" >> "${GITHUB_OUTPUT}"
