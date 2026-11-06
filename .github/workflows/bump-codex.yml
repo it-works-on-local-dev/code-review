@@ -1,0 +1,229 @@
+name: Bump Codex
+
+# Dependabot follows the actions' commit pins but not the npm version that code-review.yml names
+# in the codex-version input of the Codex action, so this workflow proposes that bump itself.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs would race on the same branch and PR
+concurrency:
+  group: bump-codex
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump
+    runs-on: ubuntu-latest
+    steps:
+      # The release-manager app's token, not GITHUB_TOKEN: a PR made with GITHUB_TOKEN triggers no
+      # other workflow, so the bump PR would get no CI run.
+      #
+      # The bump edits code-review.yml, which is itself a workflow file, and GitHub refuses a push
+      # that creates or updates a workflow file unless the token has the workflows permission. So
+      # the release-manager app must be granted the "Workflows: Read and write" repository
+      # permission in its settings, and the token asks for it below. Setting any permission-*
+      # input scopes the token to exactly those, so every permission the job uses is listed:
+      # contents (push the bump branch, delete a superseded one), pull-requests (list, open and
+      # close bump PRs), and workflows (push the edited workflow file).
+      - name: Generate release-manager app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      # The run's own ref, which is main for the schedule and whichever branch a dispatch picks.
+      # The PR goes back to that ref, so its diff is the one line.
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Compare the pinned Codex CLI with npm's latest
+        id: pin
+        run: |
+          set -euo pipefail
+          file=.github/workflows/code-review.yml
+          version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+
+          lines="$(grep -E '^[[:space:]]+codex-version:[[:space:]]' "${file}" || true)"
+          if [ -z "${lines}" ] || [ "$(printf '%s\n' "${lines}" | wc -l)" -ne 1 ]; then
+            echo "::error file=${file}::Expected exactly one codex-version line, found: ${lines:-none}"
+            exit 1
+          fi
+          current="$(printf '%s\n' "${lines}" | sed -E 's/^[[:space:]]+codex-version:[[:space:]]+([^[:space:]#]+).*/\1/')"
+          if ! [[ ${current} =~ ${version_re} ]]; then
+            echo "::error file=${file}::The codex-version '${current}' isn't a plain x.y.z version."
+            exit 1
+          fi
+
+          latest="$(curl -fsS --retry 3 --max-time 30 https://registry.npmjs.org/@openai/codex/latest | jq -er '.version')"
+          if ! [[ ${latest} =~ ${version_re} ]]; then
+            echo "::error::npm's latest @openai/codex version '${latest}' isn't a plain x.y.z version."
+            exit 1
+          fi
+
+          echo "current=${current}" >> "${GITHUB_OUTPUT}"
+          echo "latest=${latest}" >> "${GITHUB_OUTPUT}"
+          if [ "${current}" = "${latest}" ]; then
+            echo "The pin is already npm's latest (${latest}); nothing to bump."
+            echo "bump=false" >> "${GITHUB_OUTPUT}"
+          elif [ "$(printf '%s\n%s\n' "${current}" "${latest}" | sort -V | tail -n 1)" != "${latest}" ]; then
+            # Someone pinned ahead of the latest tag; a "bump" would be a downgrade
+            echo "::notice::The pin (${current}) is ahead of npm's latest (${latest}); nothing to bump."
+            echo "bump=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "bump=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # Idempotent: one branch and one PR per target version, so a second run for the same version
+      # finds the open PR and stops.
+      #
+      # Every open same-repository PR on the exact head counts, whoever opened it: --head matches
+      # the branch name alone, so a fork's PR from a branch of the same name is filtered out by
+      # isCrossRepository, but a person's PR on this branch is not. Pushing would rewrite that PR's
+      # head and lose its commits, and gh pr create would then fail because a PR for that head and
+      # base already exists.
+      #
+      # The lookup ignores the base. The branch name carries only the version, so a run on another
+      # branch would push to the same branch name and force-push over the head of an open PR that
+      # targets a different base. Only the app's own PR on this run's base is the expected case and
+      # stops the run quietly. Any other open PR on the head, a person's PR on any base or the
+      # app's own PR on another base, stops the run with a notice naming it, and nothing is pushed.
+      - name: Look for an open PR for this target version
+        id: existing
+        if: steps.pin.outputs.bump == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          LATEST: ${{ steps.pin.outputs.latest }}
+        run: |
+          set -euo pipefail
+          branch="bump-codex/${LATEST}"
+          prs="$(gh pr list --state open --head "${branch}" --limit 100 --json number,author,baseRefName,headRefName,isCrossRepository)"
+
+          same_base="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" --arg app "app/${APP_SLUG}" \
+            '[.[] | select(.isCrossRepository == false and .headRefName == $head and .baseRefName == $base and .author.login == $app)] | .[0].number // empty' <<< "${prs}")"
+          if [ -n "${same_base}" ]; then
+            echo "A PR for ${LATEST} is already open (#${same_base}); opening no second one."
+            echo "open=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          other="$(jq -r --arg head "${branch}" --arg base "${GITHUB_REF_NAME}" --arg app "app/${APP_SLUG}" \
+            '[.[] | select(.isCrossRepository == false and .headRefName == $head and (.author.login != $app or .baseRefName != $base))] | .[0] // empty | "#\(.number) by \(.author.login // "an unknown author") targeting \(.baseRefName)"' <<< "${prs}")"
+          if [ -n "${other}" ]; then
+            echo "::notice::A PR on ${branch} is already open (${other}), and it isn't the app's own PR on this run's base ${GITHUB_REF_NAME}. Pushing ${branch} would rewrite that PR's head, so this run pushes nothing."
+            echo "open=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "open=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # Best effort: a failed fetch, parse or comparison here only leaves the line out of the PR
+      # body, and continue-on-error keeps even an unforeseen failure from blocking the bump.
+      - name: Check Codex's model catalogue
+        id: model
+        if: steps.pin.outputs.bump == 'true' && steps.existing.outputs.open == 'false'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          note="${RUNNER_TEMP}/model-note.txt"
+          rm -f "${note}"
+
+          default="$(awk '/^[[:space:]]+default-codex-model:[[:space:]]*$/ {f=1; next} f && /^[[:space:]]+default:/ {print $2; exit}' .github/workflows/code-review.yml)"
+          if [ -z "${default}" ]; then
+            echo "::warning::Couldn't read the default-codex-model default; skipping the model nudge."
+            exit 0
+          fi
+
+          # The lowest priority number is the catalogue's first pick. Hidden entries are internal
+          # models, so only listed gpt- models count.
+          if ! top="$(curl -fsS --retry 3 --max-time 30 https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json \
+            | jq -er '[.models[] | select(.visibility == "list" and (.slug | type == "string" and test("^gpt-")) and (.priority | type == "number"))] | min_by(.priority) | .slug')"; then
+            echo "::warning::Couldn't read the top model from Codex's catalogue; skipping the model nudge."
+            exit 0
+          fi
+          if ! [[ ${top} =~ ^gpt-[A-Za-z0-9._-]+$ ]]; then
+            echo "::warning::The catalogue's top slug isn't a plain model name; skipping the model nudge."
+            exit 0
+          fi
+
+          if [ "${top}" = "${default}" ]; then
+            echo "The catalogue's top model (${top}) is the workflow's default; no nudge."
+            exit 0
+          fi
+          # The backticks are literal Markdown, not command substitution
+          # shellcheck disable=SC2016
+          printf 'Codex'"'"'s model catalogue now puts `%s` first, while `default-codex-model` in `code-review.yml` is still `%s`. This PR leaves it alone; change it if you want the newer model.\n' "${top}" "${default}" > "${note}"
+          echo "Nudge: the catalogue puts ${top} first (default ${default})."
+
+      - name: Open the bump PR
+        if: steps.pin.outputs.bump == 'true' && steps.existing.outputs.open == 'false'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          CURRENT: ${{ steps.pin.outputs.current }}
+          LATEST: ${{ steps.pin.outputs.latest }}
+        run: |
+          set -euo pipefail
+          file=.github/workflows/code-review.yml
+          branch="bump-codex/${LATEST}"
+          # fix(deps), not chore(deps): release-please releases nothing for chore, so callers on the
+          # v2 tag would never get the new CLI. fix cuts a patch release when this merges, as the
+          # fix(deps) titles in dependabot.yml do. The title has no @openai/codex either, since an
+          # @word in a changelog entry becomes a profile link.
+          title="fix(deps): bump the Codex CLI from ${CURRENT} to ${LATEST}"
+
+          # The one pin line; versions are validated x.y.z, so only the dots need escaping
+          current_re="${CURRENT//./\\.}"
+          sed -i -E "s/^([[:space:]]+codex-version:[[:space:]]+)${current_re}([[:space:]]*(#.*)?)\$/\1${LATEST}\2/" "${file}"
+          if [ "$(git diff --numstat -- "${file}" | awk '{print $1 "," $2}')" != "1,1" ] || [ -n "$(git status --porcelain | grep -v -F " ${file}" || true)" ]; then
+            echo "::error::Expected the bump to change exactly one line of ${file}."
+            git diff
+            exit 1
+          fi
+
+          bot_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "${branch}"
+          git add -- "${file}"
+          git commit -m "${title}"
+          # A branch left behind by a closed PR for the same version is simply replaced
+          git push --force origin "HEAD:refs/heads/${branch}"
+
+          body="${RUNNER_TEMP}/pr-body.md"
+          {
+            # The backticks are literal Markdown, not command substitution
+            # shellcheck disable=SC2016
+            printf 'Bumps the pinned Codex CLI, the `codex-version` input of the Codex action in `code-review.yml`, from `%s` to `%s`, the latest `@openai/codex` release on npm: https://www.npmjs.com/package/@openai/codex/v/%s\n' "${CURRENT}" "${LATEST}" "${LATEST}"
+            if [ -s "${RUNNER_TEMP}/model-note.txt" ]; then
+              printf '\n'
+              cat "${RUNNER_TEMP}/model-note.txt"
+            fi
+            printf '\nOpened by the Bump Codex workflow.\n'
+          } > "${body}"
+
+          url="$(gh pr create --base "${GITHUB_REF_NAME}" --head "${branch}" --title "${title}" --body-file "${body}")"
+          echo "Opened ${url}"
+          number="${url##*/}"
+
+          # An open bump PR for an older target version is superseded by this one: it would only
+          # edit the same line to a version that is no longer the latest. Close it with a pointer
+          # and delete its branch. This runs after the new PR exists, so a failure above never
+          # leaves the repository without an open bump PR. Only the app's own same-repository PRs
+          # on a bump-codex/<version> branch are touched, never a person's or a fork's.
+          gh pr list --state open --base "${GITHUB_REF_NAME}" --author "app/${APP_SLUG}" --limit 100 --json number,headRefName,isCrossRepository \
+            | jq -r --arg branch "${branch}" \
+              '.[] | select(.isCrossRepository == false and (.headRefName | test("^bump-codex/[0-9]+\\.[0-9]+\\.[0-9]+$")) and .headRefName != $branch) | .number' \
+            | while read -r old; do
+              gh pr close "${old}" --delete-branch --comment "Superseded by #${number}, which bumps to ${LATEST}."
+            done
