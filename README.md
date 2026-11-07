@@ -1,6 +1,6 @@
 # code-review
 
-A reusable GitHub Actions workflow, [`.github/workflows/code-review.yml`](.github/workflows/code-review.yml), that has Claude or OpenAI Codex review your repository's pull requests. It runs your repository's own checks, reads the diff, posts each finding as an inline comment and a summary comment, and does it all as your own GitHub App. You call it from a short workflow file, a stub, in your repository.
+A reusable GitHub Actions workflow, [`.github/workflows/code-review.yml`](.github/workflows/code-review.yml), that has Anthropic Claude or OpenAI Codex review your repository's pull requests. It runs your repository's own checks, reads the diff, posts each finding as an inline comment and a summary comment, and does it all as your own GitHub App. You call it from a short workflow file, a stub, in your repository.
 
 - [What the workflow does](#what-the-workflow-does)
 - [How it keeps secrets away from PR code](#how-it-keeps-secrets-away-from-pr-code)
