@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/it-works-on-local-dev/code-review/compare/v2.0.0...v2.1.0) (2026-11-07)
+
+
+### Features
+
+* run the request job and the failure reply on ubuntu-slim ([#35](https://github.com/it-works-on-local-dev/code-review/issues/35)) ([f938522](https://github.com/it-works-on-local-dev/code-review/commit/f93852234fb05fa4d16be2e623723e884c9c6b28))
+
 ## [2.0.0](https://github.com/it-works-on-local-dev/code-review/compare/v1.2.1...v2.0.0) (2026-11-06)
 
 
