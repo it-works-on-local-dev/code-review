@@ -130,6 +130,18 @@ on:
           ubuntu-24.04 instead, since the Codex action can't yet drop sudo on Ubuntu 26.04.
         type: string
         default: '"ubuntu-latest"'
+      request-runs-on:
+        description: >-
+          The runner for the request job and the failure reply, as JSON like runs-on. Each takes
+          seconds, holds the app key and runs no PR code, and GitHub bills a hosted job as a whole
+          minute however short it is, so the default is the 1-core '"ubuntu-slim"', whose minute
+          costs a third of ubuntu-latest's. A self-hosted runner here must meet runs-on's
+          conditions, and a review request then gets its 👀 only once one of them is free. The
+          request job checks runs-on's JSON but can't check its own runner: a value that isn't a
+          JSON label string or array stops both jobs before they start. An empty value, which is
+          what an unset repository variable passes, means the default.
+        type: string
+        default: '"ubuntu-slim"'
     # Callers pass each secret by name rather than with secrets: inherit, so this workflow, called
     # at a mutable ref such as @v1, never sees their other repository and organisation secrets. A
     # secret added here reaches no caller until its stub passes it, and a required one stops every
@@ -189,7 +201,7 @@ jobs:
           (inputs.review-app-slug != '' &&
             contains(github.event.comment.body, format('@{0}', inputs.review-app-slug)))) &&
         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.request-runs-on || '"ubuntu-slim"') }}
     timeout-minutes: 5
     permissions: {}
     env:
@@ -1569,7 +1581,7 @@ jobs:
       always() && github.event_name == 'issue_comment' &&
       needs.request.outputs.review == 'true' && needs.review.result != 'success' &&
       needs.review.outputs.withheld-notice != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.request-runs-on || '"ubuntu-slim"') }}
     timeout-minutes: 5
     permissions: {}
     steps:
