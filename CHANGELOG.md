@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.2](https://github.com/it-works-on-local-dev/code-review/compare/v2.1.1...v2.1.2) (2026-11-19)
+
+
+### Bug Fixes
+
+* **deps:** bump anthropics/claude-code-action from 1.0.269 to 1.0.276 ([#43](https://github.com/it-works-on-local-dev/code-review/issues/43)) ([454cc62](https://github.com/it-works-on-local-dev/code-review/commit/454cc62158be51f7e1b1e1210bdf0fa1999c1594))
+* **deps:** bump the Codex CLI from 0.167.0 to 0.169.0 ([#41](https://github.com/it-works-on-local-dev/code-review/issues/41)) ([84908f4](https://github.com/it-works-on-local-dev/code-review/commit/84908f490defca783647a8cfc8eab5d800277b79))
+
 ## [2.1.1](https://github.com/it-works-on-local-dev/code-review/compare/v2.1.0...v2.1.1) (2026-11-14)
 
 
